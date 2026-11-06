@@ -2,7 +2,7 @@
 export const BRAND = {
   name: '링아웃',
   english: 'RINGOUT',
-  slogan: '도착할 때까지 울리는 알람',
+  slogan: '목표 지점에 도착해야 끝나는 알람',
 } as const
 
 export const COLORS = {

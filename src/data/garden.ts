@@ -1,6 +1,8 @@
+import { useSyncExternalStore } from 'react'
+
 /**
  * 알람 리워드: 도착할 때마다 씨앗이 자란다. 첫 도착에 새싹이 돋고, 두 번째 도착에 나무가 된다.
- * 로그인이 없어서 이 브라우저에만 저장한다.
+ * 다 자란 나무는 광장의 정원 타일에 심는다. 로그인이 없어서 이 브라우저에만 저장한다.
  */
 
 const KEY = 'ringout-world.garden'
@@ -9,29 +11,81 @@ export const SPROUT_ARRIVALS = 1
 
 export type Stage = 'seed' | 'sprout' | 'tree'
 
-export type Garden = { arrivals: number }
+export type PlantedTree = { tile: number; at: number }
+
+export type Garden = { arrivals: number; planted: PlantedTree[] }
 
 export function loadGarden(): Garden {
   try {
     const saved = JSON.parse(window.localStorage.getItem(KEY) ?? 'null')
-    if (saved && Number.isInteger(saved.arrivals) && saved.arrivals >= 0) return { arrivals: saved.arrivals }
+    if (saved && Number.isInteger(saved.arrivals) && saved.arrivals >= 0) {
+      const planted = Array.isArray(saved.planted)
+        ? saved.planted.filter((tree: unknown): tree is PlantedTree => typeof tree === 'object' && tree !== null && Number.isInteger((tree as PlantedTree).tile) && typeof (tree as PlantedTree).at === 'number')
+        : []
+      return { arrivals: saved.arrivals, planted }
+    }
   } catch {
     // 저장된 값이 없거나 읽을 수 없으면 처음부터 키운다.
   }
-  return { arrivals: 0 }
+  return { arrivals: 0, planted: [] }
 }
 
-export function recordArrival(): Garden {
-  const next = { arrivals: loadGarden().arrivals + 1 }
+let current: Garden | null = null
+const listeners = new Set<() => void>()
+
+function getGarden() {
+  current ??= loadGarden()
+  return current
+}
+
+function save(next: Garden) {
+  current = next
   try {
     window.localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
     // 저장하지 못해도 이번 화면에는 보여 준다.
   }
+  for (const listener of listeners) listener()
+}
+
+/** 광장과 HUD가 같은 정원 상태를 보도록 구독한다. */
+export function useGarden() {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    getGarden,
+  )
+}
+
+export function recordArrival(): Garden {
+  const garden = getGarden()
+  const next = { ...garden, arrivals: garden.arrivals + 1 }
+  save(next)
   return next
 }
 
+/** 다 자랐지만 아직 정원에 심지 않은 나무 수 */
+export function plantableCount(garden: Garden) {
+  return Math.max(0, Math.floor(garden.arrivals / TREE_ARRIVALS) - garden.planted.length)
+}
+
+/** 빈 타일에 나무를 심는다. 심을 나무가 없거나 이미 심은 자리면 false. */
+export function plantTree(tile: number) {
+  const garden = getGarden()
+  if (plantableCount(garden) <= 0 || garden.planted.some((tree) => tree.tile === tile)) return false
+  save({ ...garden, planted: [...garden.planted, { tile, at: Date.now() }] })
+  return true
+}
+
 const ORDINALS = ['첫', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열']
+
+export function ordinal(index: number) {
+  return ORDINALS[index - 1] ?? `${index}`
+}
 
 /** 지금 키우고 있는 나무의 진행 상태 */
 export function growth(arrivals: number) {
@@ -39,15 +93,26 @@ export function growth(arrivals: number) {
   const progress = arrivals === 0 ? 0 : arrivals - (treeIndex - 1) * TREE_ARRIVALS
   const stage: Stage = progress >= TREE_ARRIVALS ? 'tree' : progress >= SPROUT_ARRIVALS ? 'sprout' : 'seed'
   const stageName = { seed: '씨앗', sprout: '새싹', tree: '나무' }[stage]
-  const title = `${ORDINALS[treeIndex - 1] ?? `${treeIndex}`} 번째 나무 · ${stageName}`
+  const title = `${ordinal(treeIndex)} 번째 나무 · ${stageName}`
   const left = stage === 'seed' ? SPROUT_ARRIVALS - progress : TREE_ARRIVALS - progress
   const next =
     stage === 'tree'
-      ? '나무가 다 자랐어요! 다음 도착부터 새 씨앗을 키워요'
+      ? '나무가 다 자랐어요! 광장 정원에 심어 주세요'
       : stage === 'seed'
         ? `${numberWord(left)} 번 더 도착하면 새싹이 돋아나요`
         : `${numberWord(left)} 번 더 도착하면 나무로 자라요`
   return { arrivals, treeIndex, progress, stage, title, next, completedTrees: Math.floor(arrivals / TREE_ARRIVALS) }
+}
+
+/**
+ * 광장에서 따라다니는 씨앗의 모습. 심을 나무가 있으면 나무를 이고 다니고,
+ * 다 심었으면 다음 씨앗으로 돌아간다.
+ */
+export function companionStage(garden: Garden): Stage | null {
+  if (garden.arrivals === 0) return null
+  if (plantableCount(garden) > 0) return 'tree'
+  const { stage } = growth(garden.arrivals)
+  return stage === 'tree' ? 'seed' : stage
 }
 
 function numberWord(count: number) {

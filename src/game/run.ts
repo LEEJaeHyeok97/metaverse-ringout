@@ -1,5 +1,6 @@
 import { growth } from '../data/garden'
 import type { ItemKind } from './course'
+import type { GuideId } from '../data/ringout'
 
 /** 내 출근길 진행 상태. 3D 화면이 매 프레임 쓰고 HUD가 주기적으로 읽는다. */
 
@@ -38,6 +39,11 @@ export const run = {
   boxesTaken: new Map<string, number>(),
   boosterUntil: 0,
   shieldUntil: 0,
+  /** 지금 화면 옆에 떠 있는 링아웃 가이드 */
+  guide: null as { id: GuideId; at: number } | null,
+  guidesShown: new Set<GuideId>(),
+  /** 알람이 울린 때(게임 초). 도착 후 기록 화면에 쓴다. */
+  rings: [] as number[],
 }
 
 let toastKey = 0
@@ -64,6 +70,9 @@ export function resetRun(startAt: number, lane: number) {
   run.boxesTaken = new Map()
   run.boosterUntil = 0
   run.shieldUntil = 0
+  run.guide = null
+  run.guidesShown = new Set()
+  run.rings = []
 }
 
 /** 출발(첫 알람)부터 지난 초. 출발 전이면 음수다. */
@@ -80,3 +89,10 @@ export function toast(text: string, tone: Toast['tone'] = 'bad') {
 
 // 개발 서버에서만 브라우저 자동 점검이 진행 상태를 읽을 수 있게 열어 둔다.
 if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds }
+
+/** 링아웃 기능을 설명하는 가이드 카드를 띄운다. 한 판에 같은 가이드는 한 번만 보여 준다. */
+export function showGuide(id: GuideId) {
+  if (run.guidesShown.has(id)) return
+  run.guidesShown.add(id)
+  run.guide = { id, at: performance.now() }
+}

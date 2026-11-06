@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
-import { growth, loadGarden, TREE_ARRIVALS } from '../data/garden'
+import { growth, plantableCount, TREE_ARRIVALS, useGarden } from '../data/garden'
 import { BRAND } from '../lib/brand'
 import { SeedArt } from './art/SeedArt'
 
 /** 나의 나무. 링아웃 새 기능인 알람 리워드를 미리 보여 준다. */
 export function GardenModal({ onClose }: { onClose: () => void }) {
   const closeButton = useRef<HTMLButtonElement>(null)
-  const garden = growth(loadGarden().arrivals)
+  const saved = useGarden()
+  const garden = growth(saved.arrivals)
+  const plantable = plantableCount(saved)
 
   useEffect(() => {
     closeButton.current?.focus()
@@ -51,11 +53,16 @@ export function GardenModal({ onClose }: { onClose: () => void }) {
                 {garden.progress}/{TREE_ARRIVALS}
               </span>
             </div>
-            {garden.completedTrees > 0 && <p className="text-lg">다 키운 나무 {'🌳'.repeat(Math.min(garden.completedTrees, 10))}</p>}
+            {plantable > 0 && (
+              <p className="pop-in rounded-xl border-2 border-ink bg-[#E3F5E9] px-3 py-2 text-lg font-bold">
+                🌳 심을 나무 {plantable}그루! 대기실 발판 왼쪽 정원의 빈 타일을 눌러 심어요
+              </p>
+            )}
+            {saved.planted.length > 0 && <p className="text-lg">정원에 심은 나무 {'🌳'.repeat(Math.min(saved.planted.length, 12))}</p>}
           </>
         )}
         <p className="rounded-xl bg-white/70 px-3 py-2 text-base">
-          <b className="text-accent">{BRAND.name} 알람 리워드</b> · 목적지에 도착할 때마다 씨앗이 자라요. 씨앗 → 새싹 → 나무!
+          <b className="text-accent">{BRAND.name} 알람 리워드</b> · 목적지에 도착할 때마다 씨앗이 자라요. 씨앗 → 새싹 → 나무 → 정원에 심기!
         </p>
       </section>
     </div>

@@ -60,7 +60,7 @@ import {
   WARP_Z,
 } from '../../game/course'
 import { growth, recordArrival } from '../../data/garden'
-import { gameSeconds, run, toast } from '../../game/run'
+import { gameSeconds, run, showGuide, toast } from '../../game/run'
 import { audio } from '../../lib/audio'
 import { connection, type HitEvent } from '../../net/connection'
 import { animIndex, type Anim, type PlayerInfo } from '../../net/protocol'
@@ -253,19 +253,22 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     const itemPressed = input.itemCount !== lastItem.current && !blocked
     lastItem.current = input.itemCount
 
-    // 링아웃은 도착하기 전까지 주기마다 다시 울린다.
+    // 링아웃은 제한 시간 안에 도착하지 못하면 다시 울린다. 게임에서는 제한 시간이 10초다.
     const ring = ringIndex(t)
     const newRing = ring !== lastRing.current && ring >= 0
     lastRing.current = ring
     if (newRing && run.phase !== 'finished') {
       audio.alarm()
+      run.rings.push(t)
+      if (ring === 0) showGuide('alarm')
+      else if (run.appSet) showGuide('reRing')
       if (run.phase === 'running') {
         run.boostUntil = now + BOOST_SECONDS * 1000
         if (now < run.stunUntil && stunAnim.current !== 'ufo') {
           run.stunUntil = now
           toast('알람 소리에 벌떡! 다시 출발', 'good')
         } else if (ring > 0 && run.appSet) {
-          toast('링아웃이 또 울려요! 정신이 번쩍, 잠깐 빨라져요', 'info')
+          toast('제한 시간이 지나 링아웃이 다시 울려요! 정신이 번쩍, 잠깐 빨라져요', 'info')
         }
       }
     }
@@ -439,6 +442,10 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       else if (planar > 0.5) anim = 'walk'
       motion.current.speed = planar
 
+      // 구간마다 링아웃의 모임 기능을 소개한다. 함께 달리는 이 레이스가 곧 모임이다.
+      if (p.z < -110) showGuide('groupFind')
+      if (p.z < -228) showGuide('group')
+
       if (!warnedLate.current && t >= LATE_SECONDS) {
         warnedLate.current = true
         audio.effect('late')
@@ -452,6 +459,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         connection.send({ t: 'finish' })
         audio.effect('arrive')
         toast('도착! 링아웃 알람이 꺼졌어요', 'good')
+        showGuide('arrive')
         // 알람 리워드: 도착할 때마다 씨앗이 자란다.
         run.reward = growth(recordArrival().arrivals)
         setReward(run.reward)

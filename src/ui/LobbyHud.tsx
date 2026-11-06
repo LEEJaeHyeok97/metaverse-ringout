@@ -2,9 +2,11 @@ import { useState, type FormEvent } from 'react'
 import { BRAND } from '../lib/brand'
 import { MAX_ROOM_PLAYERS } from '../game/course'
 import { INTRO_BOARDS } from '../data/ringout'
+import { plantableCount, useGarden } from '../data/garden'
 import { connection, type ConnectionState } from '../net/connection'
 import { RingoutLogo } from './art/RingoutLogo'
 import { ChatBox } from './ChatBox'
+import { StoreLinks } from './StoreLinks'
 import { MuteButton } from './MuteButton'
 import { TouchControls } from './TouchJoystick'
 import { useTick } from './useTick'
@@ -139,6 +141,7 @@ type LobbyHudProps = {
 
 export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo, infoOpen, onOpenGarden }: LobbyHudProps) {
   const showPanel = panelOpen || state.room !== null
+  const plantable = plantableCount(useGarden())
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -150,11 +153,14 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
             </span>
           </h1>
           <StatusPill state={state} />
+          <div className="pointer-events-auto max-sm:hidden">
+            <StoreLinks compact />
+          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
-            <button type="button" className="sketch-button pointer-events-auto bg-white px-3 py-1 text-lg" onClick={onOpenGarden}>
-              🌱 나의 나무
+            <button type="button" className={`sketch-button pointer-events-auto px-3 py-1 text-lg ${plantable > 0 ? 'bg-[#E3F5E9]' : 'bg-white'}`} onClick={onOpenGarden}>
+              {plantable > 0 ? `🌳 심을 나무 ${plantable}` : '🌱 나의 나무'}
             </button>
             <MuteButton />
           </div>
@@ -174,6 +180,11 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
       <p className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/80 px-3 text-base whitespace-nowrap text-pencil max-sm:hidden">
         WASD 이동 · 스페이스 점프/보기 · F 때리기 · 엔터 채팅
       </p>
+      {plantable > 0 && nearInfo === null && !infoOpen && !showPanel && (
+        <p className="sketch pop-in absolute bottom-40 left-1/2 -translate-x-1/2 bg-[#E3F5E9] px-4 py-1 text-xl whitespace-nowrap max-sm:bottom-52 max-sm:text-base">
+          🌳 다 자란 나무가 있어요! 발판 왼쪽 <b>정원</b>의 빈 타일을 눌러 심어요
+        </p>
+      )}
       {nearInfo !== null && !infoOpen && (
         <p className="sketch pop-in absolute bottom-28 left-1/2 -translate-x-1/2 bg-accent-soft px-4 py-1 text-xl whitespace-nowrap max-sm:bottom-40">
           🔍 <b>스페이스</b>로 「{INTRO_BOARDS[nearInfo]?.title ?? '링아웃 알람'}」 자세히 보기

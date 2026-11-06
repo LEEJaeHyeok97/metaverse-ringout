@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { RoundedBox } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { INTRO_BOARDS, PHONE_SCREEN } from '../data/ringout'
 import { audio } from '../lib/audio'
-import { drawRingoutLogo } from '../ui/art/RingoutLogo'
+import { useLogoImage } from '../ui/art/RingoutLogo'
 import { BRAND, COLORS, FONT } from '../lib/brand'
-import { BOARD_SPOTS, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT } from '../game/lobby'
+import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT } from '../game/lobby'
 import { GRAVITY, JUMP_SPEED, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
 import { nicknameOf, tryPunch } from './combat'
 import { PunchEffects } from './PunchEffects'
@@ -19,19 +19,21 @@ import { Label } from './Label'
 import { NameAndBubble, RemotePlayers } from './Players'
 import { CompanionSeed } from './Seed'
 import { StickFigure, type Motion } from './StickFigure'
-import { growth, loadGarden } from '../data/garden'
-import { useCanvasTexture, writeLines } from './useCanvasTexture'
+import { companionStage, plantableCount, plantTree, useGarden } from '../data/garden'
+import { GardenPlot } from './Garden'
+import { useCanvasTexture } from './useCanvasTexture'
 
 const LOBBY_SPEED = 7
 const SEND_INTERVAL = 1 / 15
 
 function PhoneScreen() {
+  const logo = useLogoImage()
   const draw = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number) => {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, w, h)
     ctx.fillStyle = COLORS.ink
     ctx.textAlign = 'center'
-    drawRingoutLogo(ctx, w / 2 - 110, 90, 96)
+    if (logo) ctx.drawImage(logo, w / 2 - 158, 42, 96, 96)
     ctx.font = `bold 64px ${FONT}`
     ctx.fillText(BRAND.english, w / 2 + 50, 112)
     ctx.fillStyle = COLORS.accent
@@ -48,11 +50,11 @@ function PhoneScreen() {
     ctx.roundRect(w / 2 - 170, 680, 340, 110, 55)
     ctx.stroke()
     ctx.font = `bold 52px ${FONT}`
-    ctx.fillText('끌 수 없어요 🙅', w / 2, 755)
+    ctx.fillText('끄면 도착 미션 →', w / 2, 755, 320)
     ctx.font = `40px ${FONT}`
     ctx.fillStyle = COLORS.pencil
     ctx.fillText('가까이 가서 스페이스', w / 2, 900)
-  }, [])
+  }, [logo])
   const texture = useCanvasTexture(draw, 560, 1000)
   return (
     <mesh position={[0, 0, 0.27]}>
@@ -62,7 +64,7 @@ function PhoneScreen() {
   )
 }
 
-/** 광장 가운데 거대한 링아웃 휴대폰. 주기마다 흔들리며 소리 물결을 낸다. */
+/** 광장 가운데 거대한 링아웃 휴대폰. 몇 초마다 흔들리며 소리 물결을 낸다. */
 function GiantPhone({ onOpen }: { onOpen: () => void }) {
   const phone = useRef<THREE.Group>(null)
   const waves = useRef<THREE.Group>(null)
@@ -121,12 +123,12 @@ function IntroBoard({ index, onOpen }: { index: number; onOpen: () => void }) {
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, w, 400)
       ctx.textAlign = 'center'
-      ctx.fillStyle = index === 3 ? COLORS.accent : COLORS.ink
-      ctx.font = `bold 66px ${FONT}`
-      ctx.fillText(board.title, w / 2, 90)
+      ctx.fillStyle = index === INTRO_BOARDS.length - 1 ? COLORS.accent : COLORS.ink
+      ctx.font = `bold 62px ${FONT}`
+      ctx.fillText(board.title, w / 2, 90, w - 40)
       ctx.fillStyle = COLORS.ink
       ctx.font = `46px ${FONT}`
-      writeLines(ctx, board.lines, w / 2, 190, 70)
+      board.lines.forEach((line, row) => ctx.fillText(line, w / 2, 190 + row * 70, w - 40))
     },
     [board, index],
   )
@@ -181,8 +183,8 @@ function MatchPad() {
 }
 
 const TREES: [number, number, number][] = [
-  [-24, 0, -22], [-12, 0, -26], [10, 0, -25], [24, 0, -20], [-26, 0, 2], [26, 0, 0],
-  [-24, 0, 22], [-10, 0, 26], [12, 0, 26], [25, 0, 22], [-6, 0, -18], [7, 0, -17],
+  [-24, 0, -22], [-15, 0, -26], [15, 0, -25], [24, 0, -20], [-26, 0, 2], [26, 0, 0],
+  [-24, 0, 22], [-5, 0, 28], [12, 0, 26], [25, 0, 22], [0, 0, -26],
 ]
 
 type LobbyProps = {
@@ -193,6 +195,19 @@ type LobbyProps = {
   onNearInfo: (index: number | null) => void
   onOpenInfo: (index: number) => void
   nearInfo: number | null
+}
+
+/** 정원 타일에서 이만큼 안에 있어야 나무를 심을 수 있다. */
+const PLANT_REACH = 7
+const PLANT_CHEER_MS = 2200
+
+type PlayerExtras = {
+  /** 내가 서 있는 정원 타일이 바뀌면 알린다. */
+  onStandingTile: (tile: number | null) => void
+  /** 정원 타일 위에서 스페이스를 눌렀다. 심었으면 true */
+  onPlantHere: (tile: number) => boolean
+  /** 나무를 심고 만세하는 동안 */
+  cheerUntil: RefObject<number>
 }
 
 function nearestInfo(x: number, z: number) {
@@ -209,7 +224,7 @@ function nearestInfo(x: number, z: number) {
 }
 
 /** 내 캐릭터. 서버에 붙지 못해도 혼자 돌아다닐 수 있다. */
-function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<LobbyProps, 'players' | 'nearInfo'>) {
+function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingTile, onPlantHere, cheerUntil }: Omit<LobbyProps, 'players' | 'nearInfo'> & PlayerExtras) {
   const group = useRef<THREE.Group>(null)
   const motion = useRef<Motion>({ anim: 'idle', speed: 0 })
   const velocity = useRef(new THREE.Vector2())
@@ -218,6 +233,7 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
   const sendTimer = useRef(0)
   const onPad = useRef(false)
   const nearInfo = useRef<number | null>(null)
+  const standingTile = useRef<number | null>(null)
   const lastPunch = useRef(input.punchCount)
   const stunUntil = useRef(0)
   const punchUntil = useRef(0)
@@ -245,7 +261,8 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
     const delta = Math.min(rawDelta, 0.05)
     // 자세히 보기 창이 열려 있으면 제자리에 선다.
     const stunned = performance.now() < stunUntil.current
-    const move = overlay.open || stunned ? { x: 0, y: 0 } : moveVector()
+    const planting = performance.now() < cheerUntil.current
+    const move = overlay.open || stunned || planting ? { x: 0, y: 0 } : moveVector()
     const blend = 1 - Math.exp(-delta * 12)
     velocity.current.x += (move.x * LOBBY_SPEED - velocity.current.x) * blend
     velocity.current.y += (-move.y * LOBBY_SPEED - velocity.current.y) * blend
@@ -266,6 +283,12 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
       onNearInfo(near)
     }
 
+    const tile = gardenTileAt(node.position.x, node.position.z)
+    if (tile !== standingTile.current) {
+      standingTile.current = tile
+      onStandingTile(tile)
+    }
+
     if (input.actionCount !== lastAction.current) {
       lastAction.current = input.actionCount
       if (overlay.open || performance.now() < overlay.ignoreActionsUntil) {
@@ -274,6 +297,8 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
         // 쓰러져 있는 동안에는 아무것도 못 한다.
       } else if (near !== null) {
         onOpenInfo(near)
+      } else if (tile !== null && onPlantHere(tile)) {
+        // 정원 타일 위의 스페이스는 나무 심기로 쓴다.
       } else if (jump.current.y === 0) {
         jump.current.speed = JUMP_SPEED
         audio.effect('jump')
@@ -294,7 +319,7 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
       node.rotation.y += turn * (1 - Math.exp(-delta * 14))
     }
     const now = performance.now()
-    const anim: Anim = now < stunUntil.current ? 'down' : now < punchUntil.current ? 'punch' : jump.current.y > 0 ? 'jump' : speed > 0.5 ? 'walk' : 'idle'
+    const anim: Anim = now < stunUntil.current ? 'down' : now < cheerUntil.current ? 'cheer' : now < punchUntil.current ? 'punch' : jump.current.y > 0 ? 'jump' : speed > 0.5 ? 'walk' : 'idle'
     self.x = node.position.x
     self.y = node.position.y
     self.z = node.position.z
@@ -314,21 +339,43 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo }: Omit<Lobb
     }
   })
 
-  // 한 번이라도 도착했다면 키우는 씨앗이 따라다닌다.
-  const garden = useMemo(() => growth(loadGarden().arrivals), [])
+  // 한 번이라도 도착했다면 키우는 씨앗이 따라다닌다. 다 자란 나무가 있으면 나무를 이고 다닌다.
+  const companion = companionStage(useGarden())
   return (
     <>
       <group ref={group} position={[0, 0, 10]} rotation={[0, Math.PI, 0]}>
         <StickFigure motion={motion} color={me?.color ?? COLORS.accent} />
         <NameAndBubble id={me?.id ?? null} nickname={me ? `${me.nickname} (나)` : '나'} color={me?.color ?? COLORS.ink} />
       </group>
-      {garden.arrivals > 0 && <CompanionSeed target={group} stage={garden.stage} />}
+      {companion && <CompanionSeed key={companion} target={group} stage={companion} />}
     </>
   )
 }
 
 export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, nearInfo }: LobbyProps) {
   const grid = useGridTexture(LOBBY_HALF, LOBBY_HALF)
+  const garden = useGarden()
+  const plantable = plantableCount(garden)
+  const [standingTile, setStandingTile] = useState<number | null>(null)
+  const cheerUntil = useRef(0)
+
+  /** 다 자란 나무를 정원 타일에 심는다. 너무 멀면 가까이 오라고 알려 준다. */
+  const plant = useCallback((tile: number) => {
+    const myId = connection.getState().myId ?? -1
+    const say = (text: string) => connection.bubbles.set(myId, { text, until: performance.now() + 2200 })
+    const spot = gardenTile(tile)
+    if (Math.hypot(spot.x - self.x, spot.z - self.z) > PLANT_REACH) {
+      say('정원 가까이 가서 심어요!')
+      return false
+    }
+    if (!plantTree(tile)) return false
+    audio.unlock()
+    audio.effect('pop')
+    setTimeout(() => audio.effect('arrive'), 800)
+    cheerUntil.current = performance.now() + PLANT_CHEER_MS
+    say('🌳 나무를 심었어요!')
+    return true
+  }, [])
   return (
     <>
       <color attach="background" args={[COLORS.paper]} />
@@ -355,10 +402,19 @@ export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, n
         <IntroBoard key={index} index={index} onOpen={() => onOpenInfo(index)} />
       ))}
       <MatchPad />
+      <GardenPlot planted={garden.planted} plantable={plantable} standingTile={standingTile} onPlant={plant} />
       {TREES.map((position, index) => (
         <Tree key={index} position={position} scale={0.9 + (index % 3) * 0.15} />
       ))}
-      <LocalLobbyPlayer me={me} onPadChange={onPadChange} onNearInfo={onNearInfo} onOpenInfo={onOpenInfo} />
+      <LocalLobbyPlayer
+        me={me}
+        onPadChange={onPadChange}
+        onNearInfo={onNearInfo}
+        onOpenInfo={onOpenInfo}
+        onStandingTile={setStandingTile}
+        onPlantHere={plant}
+        cheerUntil={cheerUntil}
+      />
       <RemotePlayers players={players} myId={me?.id ?? null} />
       <PunchEffects />
     </>

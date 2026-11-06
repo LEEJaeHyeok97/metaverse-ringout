@@ -1,12 +1,14 @@
 import { TREE_ARRIVALS } from '../data/garden'
 import { GAME_TIPS } from '../data/ringout'
 import { ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
-import { gameSeconds, run, toast } from '../game/run'
+import { gameSeconds, run, showGuide, toast } from '../game/run'
 import { BRAND } from '../lib/brand'
 import { connection, type ConnectionState, type GameInfo } from '../net/connection'
 import type { PlayerInfo, ResultRow } from '../net/protocol'
 import { pressAction, setOverlayOpen } from '../scene/input'
 import { RingoutApp } from './RingoutApp'
+import { GuideCard } from './GuideCard'
+import { StoreLinks } from './StoreLinks'
 import { RingoutLogo } from './art/RingoutLogo'
 import { SeedArt } from './art/SeedArt'
 import { ChatBox } from './ChatBox'
@@ -24,7 +26,7 @@ function arrivalLabel(ms: number | null) {
   return ms / 1000 <= LATE_SECONDS ? { text: `${clockText(ms / 1000)} 정시 출근`, tone: 'text-green-600' } : { text: `${clockText(ms / 1000)} 지각`, tone: 'text-accent' }
 }
 
-/** 링아웃 알람 화면. 도착하기 전까지는 끌 수 없고 주기마다 다시 울린다. */
+/** 링아웃 도착 미션 화면. 제한 시간이 지나면 다시 울리고, 도착하면 끝난다. */
 function AlarmCard({ t }: { t: number }) {
   const finished = run.phase === 'finished'
   const ringing = !finished && isRinging(t)
@@ -42,7 +44,7 @@ function AlarmCard({ t }: { t: number }) {
         ) : (
           <>
             <p className="text-lg font-bold">📍 캠퍼스까지 {run.phase === 'running' ? `${remain}m` : '…'}</p>
-            <p className="text-base">{t < 0 ? '곧 울려요' : ringing ? '따르르릉! 울리는 중' : `${nextRing}초 뒤 또 울려요`}</p>
+            <p className="text-base">{t < 0 ? '곧 울려요' : ringing ? '따르르릉! 울리는 중' : run.appSet ? `제한 시간 ${nextRing}초 남음` : `${nextRing}초 뒤 또 울려요`}</p>
           </>
         )}
       </div>
@@ -146,7 +148,8 @@ function AppGate() {
         run.appSet = true
         run.appOpen = false
         setOverlayOpen(false)
-        toast('📱 링아웃 ON! 현관문이 열렸어요. 캠퍼스로 출발!', 'good')
+        toast('📱 도착 미션 시작! 현관문이 열렸어요. 캠퍼스로 출발!', 'good')
+        showGuide('mission')
       }}
       onCancel={() => {
         run.appOpen = false
@@ -214,6 +217,31 @@ export function RewardCard({ reward }: { reward: NonNullable<typeof run.reward> 
   )
 }
 
+/** 링아웃 앱의 하루 기록처럼, 이번 판에 알람이 울린 때와 도착한 때를 보여 준다. */
+function TodayRecord() {
+  if (run.rings.length === 0) return null
+  const arrived = run.phase === 'finished' ? (run.finishedAt - run.startAt) / 1000 : null
+  return (
+    <details open className="rounded-xl border-2 border-ink bg-white px-3 py-2">
+      <summary className="cursor-pointer text-lg font-bold">
+        📅 오늘의 링아웃 기록 · 알람 {run.rings.length}번{arrived !== null ? ` · ${clockText(arrived)} 도착` : ''}
+      </summary>
+      <ol className="mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto border-l-2 border-accent pl-3">
+        {run.rings.map((seconds, index) => (
+          <li key={seconds} className="text-base">
+            <span className="tabular-nums">{clockText(seconds)}</span> 알람 {index === 0 ? '울림' : '다시 울림 (제한 시간 초과)'}
+          </li>
+        ))}
+        {arrived !== null && (
+          <li className="text-base font-bold text-green-700">
+            <span className="tabular-nums">{clockText(arrived)}</span> 목적지 도착 · 알람 종료
+          </li>
+        )}
+      </ol>
+    </details>
+  )
+}
+
 function Results({ rows, myId }: { rows: ResultRow[]; myId: number | null }) {
   const medal = ['🥇', '🥈', '🥉']
   return (
@@ -235,7 +263,11 @@ function Results({ rows, myId }: { rows: ResultRow[]; myId: number | null }) {
           })}
         </ol>
         {run.reward ? <RewardCard reward={run.reward} /> : <p className="text-center text-lg">도착하면 씨앗을 받아 키울 수 있어요. 다음엔 꼭 도착해요!</p>}
-        <p className="text-center text-lg">도착하는 순간 {BRAND.name} 알람이 꺼져요. 실제 출근길에도 써 보세요!</p>
+        <TodayRecord />
+        <div className="flex flex-col items-center gap-1 rounded-xl bg-accent-soft px-3 py-2">
+          <p className="text-center text-lg">도착해야 끝나는 알람, 진짜 {BRAND.name}으로 내일 아침을 시작해 보세요!</p>
+          <StoreLinks compact />
+        </div>
         <button type="button" className="sketch-button bg-accent py-2 text-2xl text-white" onClick={() => connection.leaveGame()}>
           광장으로 돌아가기
         </button>
@@ -309,6 +341,7 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
           <TouchControls actionLabel={run.nearDesk ? '폰 들기' : run.nearBike !== null ? '타기' : '점프'} item={run.item ? ITEM_INFO[run.item].icon : null} />
         </div>
       )}
+      <GuideCard />
       <AppGate />
       {state.results && <Results rows={state.results} myId={state.myId} />}
     </div>
