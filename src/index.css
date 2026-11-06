@@ -1,0 +1,106 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-paper: #fbfaf6;
+  --color-ink: #1a1a1a;
+  --color-pencil: #9a968c;
+  --color-accent: #ea6e3e;
+  --color-accent-soft: #fde4d8;
+  --font-hand: 'Gaegu', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-hand);
+  word-break: keep-all;
+  /* 두 번 눌러 확대와 당겨서 새로고침이 걷기 조작을 방해하지 않게 한다. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+/* 손으로 그린 듯한 테두리. 모서리를 조금씩 다르게 둥글려 삐뚤빼뚤해 보이게 한다. */
+.sketch {
+  background: #fff;
+  border: 2.5px solid var(--color-ink);
+  border-radius: 14px 18px 12px 20px / 18px 12px 20px 14px;
+  box-shadow: 3px 4px 0 var(--color-ink);
+}
+
+.sketch-button {
+  border: 2.5px solid var(--color-ink);
+  border-radius: 12px 16px 10px 18px / 16px 10px 18px 12px;
+  box-shadow: 2px 3px 0 var(--color-ink);
+  font-weight: 700;
+  transition: transform 80ms, box-shadow 80ms;
+}
+
+.sketch-button:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0 var(--color-ink);
+}
+
+.sketch-button:active:not(:disabled) {
+  transform: translate(2px, 3px);
+  box-shadow: 0 0 0 var(--color-ink);
+}
+
+.sketch-button:disabled {
+  opacity: 0.45;
+}
+
+.notebook {
+  background-color: var(--color-paper);
+  background-image:
+    linear-gradient(#e4e1d8 1px, transparent 1px),
+    linear-gradient(90deg, #e4e1d8 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@keyframes ring-shake {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-14deg); }
+  40% { transform: rotate(12deg); }
+  60% { transform: rotate(-10deg); }
+  80% { transform: rotate(8deg); }
+}
+
+.ringing {
+  animation: ring-shake 260ms linear infinite;
+}
+
+@keyframes pop-in {
+  from { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  to { transform: scale(1); }
+}
+
+.pop-in {
+  animation: pop-in 380ms cubic-bezier(0.2, 0.85, 0.3, 1.2) both;
+}
+
+@keyframes float-up {
+  from { transform: translateY(8px); opacity: 0; }
+  15% { transform: translateY(0); opacity: 1; }
+  80% { opacity: 1; }
+  to { transform: translateY(-14px); opacity: 0; }
+}
+
+.toast {
+  animation: float-up 1.8s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ringing,
+  .pop-in,
+  .toast {
+    animation: none;
+  }
+}

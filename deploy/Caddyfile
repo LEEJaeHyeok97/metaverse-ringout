@@ -1,0 +1,7 @@
+# SITE_ADDRESS가 ":80"이면 IP 주소로 HTTP만 연다.
+# 도메인(예: ringout.example.com)을 넣으면 Caddy가 HTTPS 인증서를 자동으로 받는다.
+{$SITE_ADDRESS} {
+	encode gzip
+	# 웹소켓(/ws)도 그대로 전달된다.
+	reverse_proxy app:8787
+}

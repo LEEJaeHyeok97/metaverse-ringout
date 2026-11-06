@@ -1,0 +1,34 @@
+# EC2 한 대에서 링아웃 월드(사이트 + 실시간 서버)와 Caddy를 함께 띄운다.
+# 실행: deploy 폴더에서 `docker compose up -d --build`
+services:
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      PORT: 8787
+      MAX_PLAYERS: ${MAX_PLAYERS:-100}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS를 .env에 넣어 주세요}
+    expose:
+      - '8787'
+    # micro 인스턴스 메모리(1GB)를 다 쓰지 않게 막는다.
+    mem_limit: 512m
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
