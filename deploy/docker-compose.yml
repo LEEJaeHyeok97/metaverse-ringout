@@ -11,6 +11,9 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS를 .env에 넣어 주세요}
     expose:
       - '8787'
+    volumes:
+      # 함께 정원에 심은 나무. 재배포해도 지워지지 않는다.
+      - garden_data:/app/data
     # micro 인스턴스 메모리(1GB)를 다 쓰지 않게 막는다.
     mem_limit: 512m
 
@@ -30,5 +33,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  garden_data:
   caddy_data:
   caddy_config:

@@ -27,7 +27,7 @@ const server = createServer((request, response) => {
   response.writeHead(404).end()
 })
 
-const realtime = attachRealtime(server, { path: '/ws', maxPlayers, isOriginAllowed })
+const realtime = attachRealtime(server, { path: '/ws', maxPlayers, isOriginAllowed, gardenFile: process.env.GARDEN_FILE })
 
 server.on('upgrade', (request, socket) => {
   const { pathname } = new URL(request.url ?? '/', 'http://localhost')
@@ -49,5 +49,5 @@ process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 
 server.listen(port, () => {
-  console.log(`ringout world on :${port}, max ${maxPlayers} players, origins: ${[...allowedOrigins].join(', ') || '(none)'}`)
+  console.log(`ringout world on :${port}, max ${maxPlayers} players, origins: ${[...allowedOrigins].join(', ') || '(none)'}, garden: ${process.env.GARDEN_FILE ?? '(memory)'}`)
 })

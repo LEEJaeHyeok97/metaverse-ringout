@@ -15,10 +15,13 @@ RUN npm ci --omit=dev
 COPY server ./server
 COPY src ./src
 COPY --from=site /app/dist ./dist
+# 함께 정원을 저장하는 곳. compose가 볼륨을 붙여 재배포해도 남는다.
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 
 ENV PORT=8787
 ENV SITE_DIR=/app/dist
+ENV GARDEN_FILE=/app/data/garden.json
 EXPOSE 8787
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=6 \

@@ -31,9 +31,13 @@ export const INFO_SPOTS = [
 
 export const PHONE_INFO_INDEX = BOARD_SPOTS.length
 
-/** 다 자란 나무를 심는 나의 정원. 대기실 발판 왼쪽에 있다. */
-export const GARDEN = { x: -12, z: 22, cols: 4, rows: 3, tile: 2.4 }
+/** 모두가 다 자란 나무를 심는 함께 정원. 대기실 발판 왼쪽에 있다. 서버가 심은 나무를 저장한다. */
+export const GARDEN = { x: -12, z: 23, cols: 6, rows: 4, tile: 2.4 }
 export const GARDEN_TILES = GARDEN.cols * GARDEN.rows
+/** 정원이 차면 가장 오래된 나무부터 다른 나무에게 자리를 내준다. 늘 빈 타일이 조금 남는다. */
+export const MAX_GARDEN_TREES = GARDEN_TILES - 2
+/** 정원 타일에서 이만큼 안에 있어야 나무를 심을 수 있다. */
+export const PLANT_REACH = 7
 
 export function gardenTile(index: number) {
   const col = index % GARDEN.cols

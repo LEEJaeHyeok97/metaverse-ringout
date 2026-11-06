@@ -2,7 +2,8 @@ import { useSyncExternalStore } from 'react'
 
 /**
  * 알람 리워드: 도착할 때마다 씨앗이 자란다. 첫 도착에 새싹이 돋고, 두 번째 도착에 나무가 된다.
- * 다 자란 나무는 광장의 정원 타일에 심는다. 로그인이 없어서 이 브라우저에만 저장한다.
+ * 다 자란 나무는 광장의 함께 정원에 심는다. 정원은 서버에 있어 모두에게 보이고,
+ * 내가 몇 번 도착해 몇 그루를 심었는지는 로그인이 없어서 이 브라우저에만 저장한다.
  */
 
 const KEY = 'ringout-world.garden'
@@ -11,27 +12,29 @@ export const SPROUT_ARRIVALS = 1
 
 export type Stage = 'seed' | 'sprout' | 'tree'
 
-export type PlantedTree = { tile: number; at: number }
-
-export type Garden = { arrivals: number; planted: PlantedTree[] }
+/** shared: 함께 정원에 심은 나무 수 */
+export type Garden = { arrivals: number; shared: number }
 
 export function loadGarden(): Garden {
   try {
     const saved = JSON.parse(window.localStorage.getItem(KEY) ?? 'null')
     if (saved && Number.isInteger(saved.arrivals) && saved.arrivals >= 0) {
-      const planted = Array.isArray(saved.planted)
-        ? saved.planted.filter((tree: unknown): tree is PlantedTree => typeof tree === 'object' && tree !== null && Number.isInteger((tree as PlantedTree).tile) && typeof (tree as PlantedTree).at === 'number')
-        : []
-      return { arrivals: saved.arrivals, planted }
+      // 예전에 나만 보이게 심은 나무(planted)는 함께 정원에 다시 심을 수 있게 세지 않는다.
+      const shared = Number.isInteger(saved.shared) && saved.shared >= 0 ? saved.shared : 0
+      return { arrivals: saved.arrivals, shared }
     }
   } catch {
     // 저장된 값이 없거나 읽을 수 없으면 처음부터 키운다.
   }
-  return { arrivals: 0, planted: [] }
+  return { arrivals: 0, shared: 0 }
 }
 
 let current: Garden | null = null
 const listeners = new Set<() => void>()
+
+export function currentGarden() {
+  return getGarden()
+}
 
 function getGarden() {
   current ??= loadGarden()
@@ -70,15 +73,13 @@ export function recordArrival(): Garden {
 
 /** 다 자랐지만 아직 정원에 심지 않은 나무 수 */
 export function plantableCount(garden: Garden) {
-  return Math.max(0, Math.floor(garden.arrivals / TREE_ARRIVALS) - garden.planted.length)
+  return Math.max(0, Math.floor(garden.arrivals / TREE_ARRIVALS) - garden.shared)
 }
 
-/** 빈 타일에 나무를 심는다. 심을 나무가 없거나 이미 심은 자리면 false. */
-export function plantTree(tile: number) {
+/** 서버가 내 나무를 함께 정원에 심었다고 알려 왔다. */
+export function recordPlanted() {
   const garden = getGarden()
-  if (plantableCount(garden) <= 0 || garden.planted.some((tree) => tree.tile === tile)) return false
-  save({ ...garden, planted: [...garden.planted, { tile, at: Date.now() }] })
-  return true
+  save({ ...garden, shared: garden.shared + 1 })
 }
 
 const ORDINALS = ['첫', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열']

@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
@@ -30,9 +32,10 @@ import {
   type ResultRow,
   type RoomView,
   type ServerMessage,
+  type SharedTree,
   type SnapshotEntry,
 } from '../src/net/protocol.ts'
-import { LOBBY_HALF } from '../src/game/lobby.ts'
+import { GARDEN_TILES, gardenTile, LOBBY_HALF, MAX_GARDEN_TREES, PLANT_REACH } from '../src/game/lobby.ts'
 
 const SNAPSHOT_INTERVAL_MS = 100
 const HEARTBEAT_INTERVAL_MS = 30_000
@@ -52,6 +55,8 @@ const MAX_SPEED = WALK_SPEED * RIDE_FACTOR * 1.25
 const REACH_SLACK = 1
 const FINISH_SLACK = 3
 const LINK_PATTERN = /(https?:\/\/|www\.)/i
+/** 한 사람이 나무를 너무 자주 심지 못하게 한다. */
+const PLANT_COOLDOWN_MS = 4000
 const INVISIBLE_CHARS = /[\u0000-\u001F\u007F​-‏‪-‮⁠-⁩﻿]/g
 
 /** 서버가 가득 찼을 때의 종료 코드. 클라이언트는 이 코드면 재접속하지 않는다. */
@@ -63,6 +68,8 @@ export type RealtimeOptions = {
   path: string
   maxPlayers: number
   isOriginAllowed: (origin: string | undefined) => boolean
+  /** 함께 정원을 저장할 파일. 없으면 서버가 꺼질 때 정원도 사라진다. */
+  gardenFile?: string
   /** 테스트에서 기다리는 시간을 줄일 때만 바꾼다. */
   timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number }
 }
@@ -90,6 +97,7 @@ type Player = {
   lastPunchAt: number
   immuneUntil: number
   lastItemAt: number
+  lastPlantAt: number
 }
 
 type Room = {
@@ -122,6 +130,45 @@ function round(value: number) {
   return Math.round(value * 100) / 100
 }
 
+function loadTrees(file: string | undefined): SharedTree[] {
+  if (!file) return []
+  try {
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    if (!Array.isArray(saved)) return []
+    const seen = new Set<number>()
+    return saved
+      .filter((tree): tree is SharedTree => {
+        const ok =
+          typeof tree === 'object' &&
+          tree !== null &&
+          Number.isInteger(tree.tile) &&
+          tree.tile >= 0 &&
+          tree.tile < GARDEN_TILES &&
+          !seen.has(tree.tile) &&
+          typeof tree.nickname === 'string' &&
+          typeof tree.color === 'string' &&
+          finite(tree.at)
+        if (ok) seen.add(tree.tile)
+        return ok
+      })
+      .slice(-MAX_GARDEN_TREES)
+  } catch {
+    return [] // 처음 켰거나 파일을 읽을 수 없으면 빈 정원에서 시작한다.
+  }
+}
+
+function saveTrees(file: string | undefined, trees: SharedTree[]) {
+  if (!file) return
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    // 쓰다가 꺼져도 파일이 깨지지 않게 임시 파일에 쓰고 바꿔 끼운다.
+    writeFileSync(`${file}.tmp`, JSON.stringify(trees))
+    renameSync(`${file}.tmp`, file)
+  } catch (error) {
+    console.error('garden save failed', error)
+  }
+}
+
 function lobbySpawn() {
   const angle = Math.random() * Math.PI * 2
   const radius = 4 + Math.random() * 4
@@ -133,7 +180,7 @@ function lobbySpawn() {
  * 로비에서는 방에 있든 없든 광장에 있는 모든 사람의 위치를 주고받고, 게임이 시작되면 같은 방 사람끼리만 주고받는다.
  * 출발 시각, 도착 순위, 제한 시간은 서버가 정하고, 너무 빨리 앞으로 나아간 위치와 이른 도착 신고는 받지 않는다.
  */
-export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllowed, timing = {} }: RealtimeOptions) {
+export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllowed, gardenFile, timing = {} }: RealtimeOptions) {
   const lobbyCountdownMs = timing.lobbyCountdownMs ?? LOBBY_COUNTDOWN_MS
   const gameCountdownMs = timing.gameCountdownMs ?? COUNTDOWN_MS
   const minFinishSeconds = timing.minFinishSeconds ?? MIN_FINISH_SECONDS
@@ -144,6 +191,8 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const rooms = new Map<string, Room>()
   let nextId = 1
   let lobbyRosterDirty = false
+  /** 함께 정원. 오래 심은 나무가 앞에 온다. */
+  let trees = loadTrees(gardenFile)
 
   const send = (player: Player, message: ServerMessage) => {
     const { socket } = player
@@ -414,6 +463,26 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     broadcastGame(room, { t: 'bananas', list: room.bananas })
   }
 
+  /** 광장의 함께 정원에 나무를 심는다. 심을 나무가 있는지는 각자의 브라우저가 센다. */
+  const handlePlant = (player: Player, tile: unknown) => {
+    if (player.inGame || !Number.isInteger(tile)) return
+    const index = tile as number
+    if (index < 0 || index >= GARDEN_TILES) return
+    const now = Date.now()
+    if (now - player.lastPlantAt < PLANT_COOLDOWN_MS) return
+    const spot = gardenTile(index)
+    if (Math.hypot(spot.x - player.x, spot.z - player.z) > PLANT_REACH + REACH_SLACK) return
+    if (trees.some((tree) => tree.tile === index)) {
+      send(player, { t: 'error', message: '방금 다른 사람이 심은 자리예요. 빈 타일을 골라 주세요.' })
+      return
+    }
+    player.lastPlantAt = now
+    trees = [...trees, { tile: index, nickname: player.nickname, color: player.color, at: now }].slice(-MAX_GARDEN_TREES)
+    saveTrees(gardenFile, trees)
+    const message: ServerMessage = { t: 'garden', trees, planted: { tile: index, by: player.id } }
+    for (const other of players.values()) if (other.ready) send(other, message)
+  }
+
   const handleChat = (player: Player, raw: unknown) => {
     const text = cleanText(raw, MAX_CHAT_LENGTH)
     if (!text || LINK_PATTERN.test(text)) return
@@ -449,6 +518,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       if (!player.ready) {
         player.ready = true
         send(player, { t: 'welcome', id: player.id })
+        send(player, { t: 'garden', trees })
       }
       lobbyRosterDirty = true
       if (player.room) broadcastRoom(player.room)
@@ -508,6 +578,9 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       case 'slip':
         handleSlip(player, message.banana)
         return
+      case 'plant':
+        handlePlant(player, message.tile)
+        return
       case 'lobby':
         // 결과 화면을 닫고 광장으로 돌아왔다. 서버는 이미 로비에 두었으니 명단만 다시 보낸다.
         lobbyRosterDirty = true
@@ -543,6 +616,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       lastPunchAt: 0,
       immuneUntil: 0,
       lastItemAt: 0,
+      lastPlantAt: 0,
     }
     players.set(socket, player)
     socket.on('pong', () => {

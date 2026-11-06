@@ -6,11 +6,11 @@ import { INTRO_BOARDS, PHONE_SCREEN } from '../data/ringout'
 import { audio } from '../lib/audio'
 import { useLogoImage } from '../ui/art/RingoutLogo'
 import { BRAND, COLORS, FONT } from '../lib/brand'
-import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT } from '../game/lobby'
+import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH } from '../game/lobby'
 import { GRAVITY, JUMP_SPEED, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
 import { nicknameOf, tryPunch } from './combat'
 import { PunchEffects } from './PunchEffects'
-import { connection } from '../net/connection'
+import { connection, useConnection } from '../net/connection'
 import { animIndex, type Anim, type PlayerInfo } from '../net/protocol'
 import { FloorRing, Lights, Tree, useFollowCamera, useGridTexture } from './common'
 import { Ink } from './ink'
@@ -19,7 +19,7 @@ import { Label } from './Label'
 import { NameAndBubble, RemotePlayers } from './Players'
 import { CompanionSeed } from './Seed'
 import { StickFigure, type Motion } from './StickFigure'
-import { companionStage, plantableCount, plantTree, useGarden } from '../data/garden'
+import { companionStage, currentGarden, plantableCount, useGarden } from '../data/garden'
 import { GardenPlot } from './Garden'
 import { useCanvasTexture } from './useCanvasTexture'
 
@@ -184,7 +184,7 @@ function MatchPad() {
 
 const TREES: [number, number, number][] = [
   [-24, 0, -22], [-15, 0, -26], [15, 0, -25], [24, 0, -20], [-26, 0, 2], [26, 0, 0],
-  [-24, 0, 22], [-5, 0, 28], [12, 0, 26], [25, 0, 22], [0, 0, -26],
+  [-25, 0, 24], [-3, 0, 28.5], [12, 0, 26], [25, 0, 22], [0, 0, -26],
 ]
 
 type LobbyProps = {
@@ -197,8 +197,11 @@ type LobbyProps = {
   nearInfo: number | null
 }
 
-/** 정원 타일에서 이만큼 안에 있어야 나무를 심을 수 있다. */
-const PLANT_REACH = 7
+/** 내 머리 위 말풍선으로 잠깐 알려 준다. */
+const say = (text: string) => connection.bubbles.set(connection.getState().myId ?? -1, { text, until: performance.now() + 2200 })
+
+/** 서버가 답하지 않으면 이 시간 뒤에 다시 심을 수 있다. */
+const PLANT_WAIT_MS = 3000
 const PLANT_CHEER_MS = 2200
 
 type PlayerExtras = {
@@ -354,26 +357,42 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
 
 export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, nearInfo }: LobbyProps) {
   const grid = useGridTexture(LOBBY_HALF, LOBBY_HALF)
-  const garden = useGarden()
-  const plantable = plantableCount(garden)
+  const plantable = plantableCount(useGarden())
+  const shared = useConnection().garden
   const [standingTile, setStandingTile] = useState<number | null>(null)
   const cheerUntil = useRef(0)
+  const waitingUntil = useRef(0)
 
-  /** 다 자란 나무를 정원 타일에 심는다. 너무 멀면 가까이 오라고 알려 준다. */
+  // 서버가 내 나무를 심어 주면 만세하고 소리를 낸다.
+  useEffect(
+    () =>
+      connection.onPlanted(() => {
+        waitingUntil.current = 0
+        audio.effect('pop')
+        setTimeout(() => audio.effect('arrive'), 800)
+        cheerUntil.current = performance.now() + PLANT_CHEER_MS
+        say('🌳 나무를 심었어요!')
+      }),
+    [],
+  )
+
+  /** 다 자란 나무를 함께 정원에 심어 달라고 서버에 보낸다. 너무 멀면 가까이 오라고 알려 준다. */
   const plant = useCallback((tile: number) => {
-    const myId = connection.getState().myId ?? -1
-    const say = (text: string) => connection.bubbles.set(myId, { text, until: performance.now() + 2200 })
+    const { status, garden } = connection.getState()
+    if (plantableCount(currentGarden()) <= 0 || garden.some((tree) => tree.tile === tile)) return false
     const spot = gardenTile(tile)
     if (Math.hypot(spot.x - self.x, spot.z - self.z) > PLANT_REACH) {
       say('정원 가까이 가서 심어요!')
       return false
     }
-    if (!plantTree(tile)) return false
+    if (status !== 'online') {
+      say('서버에 연결되면 심을 수 있어요')
+      return false
+    }
+    if (performance.now() < waitingUntil.current) return true
+    waitingUntil.current = performance.now() + PLANT_WAIT_MS
     audio.unlock()
-    audio.effect('pop')
-    setTimeout(() => audio.effect('arrive'), 800)
-    cheerUntil.current = performance.now() + PLANT_CHEER_MS
-    say('🌳 나무를 심었어요!')
+    connection.send({ t: 'plant', tile })
     return true
   }, [])
   return (
@@ -402,7 +421,7 @@ export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, n
         <IntroBoard key={index} index={index} onOpen={() => onOpenInfo(index)} />
       ))}
       <MatchPad />
-      <GardenPlot planted={garden.planted} plantable={plantable} standingTile={standingTile} onPlant={plant} />
+      <GardenPlot planted={shared} myName={me?.nickname ?? null} plantable={plantable} standingTile={standingTile} onPlant={plant} />
       {TREES.map((position, index) => (
         <Tree key={index} position={position} scale={0.9 + (index % 3) * 0.15} />
       ))}

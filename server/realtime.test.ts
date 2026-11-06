@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import { BIKES, FINISH_Z } from '../src/game/course.ts'
+import { gardenTile } from '../src/game/lobby.ts'
 import type { ServerMessage } from '../src/net/protocol.ts'
 import { attachRealtime } from './realtime.ts'
 
 let server: Server
 let url = ''
+const gardenFile = join(mkdtempSync(join(tmpdir(), 'ringout-garden-')), 'garden.json')
 
 before(async () => {
   server = createServer()
@@ -15,6 +20,7 @@ before(async () => {
     path: '/ws',
     maxPlayers: 20,
     isOriginAllowed: () => true,
+    gardenFile,
     timing: { lobbyCountdownMs: 50, gameCountdownMs: 50, minFinishSeconds: 0.2, limitSeconds: 9 },
   })
   await new Promise<void>((resolve) => server.listen(0, resolve))
@@ -242,4 +248,51 @@ test('물풍선은 가까운 사람에게, 우주선은 1등에게, 귀가 포�
   assert.equal(cleared.list.length, 0)
   host.socket.close()
   leader.socket.close()
+})
+
+test('정원 가까이에서 빈 타일에 심은 나무는 모두에게 보이고 파일에 남는다', async () => {
+  const [planter, viewer] = await Promise.all(['심는이', '구경꾼'].map(connect))
+  const spot = gardenTile(5)
+  // 멀리서 심으면 받지 않는다.
+  planter.send({ t: 'move', x: spot.x + 20, y: 0, z: spot.z - 20, h: 0, a: 0 })
+  await sleep(50)
+  planter.send({ t: 'plant', tile: 5 })
+  await sleep(150)
+  assert.equal(viewer.inbox.some((m) => m.t === 'garden' && m.planted), false)
+
+  planter.send({ t: 'move', x: spot.x, y: 0, z: spot.z + 1, h: 0, a: 0 })
+  await sleep(50)
+  planter.send({ t: 'plant', tile: 5 })
+  const seen = await viewer.next('garden', (m) => m.planted?.tile === 5)
+  assert.equal(seen.trees.find((tree) => tree.tile === 5)?.nickname, '심는이')
+  await planter.next('garden', (m) => m.planted?.tile === 5)
+  assert.deepEqual(JSON.parse(readFileSync(gardenFile, 'utf8')).map((tree: { tile: number }) => tree.tile), [5])
+
+  // 쿨타임이 지나도 이미 심은 자리에는 다시 심을 수 없다.
+  const other = await connect('늦은이')
+  const welcomeGarden = await other.next('garden')
+  assert.equal(welcomeGarden.trees.length, 1)
+  other.send({ t: 'move', x: spot.x, y: 0, z: spot.z, h: 0, a: 0 })
+  await sleep(50)
+  other.send({ t: 'plant', tile: 5 })
+  await other.next('error')
+
+  // 서버를 새로 켜도 정원이 남아 있다.
+  const second = createServer()
+  attachRealtime(second, { path: '/ws', maxPlayers: 5, isOriginAllowed: () => true, gardenFile })
+  await new Promise<void>((resolve) => second.listen(0, resolve))
+  const address = second.address()
+  const socket = new WebSocket(`ws://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}/ws`)
+  const garden = await new Promise<Extract<ServerMessage, { t: 'garden' }>>((resolve) => {
+    socket.on('open', () => socket.send(JSON.stringify({ t: 'hello', nickname: '다음날', color: '#FF5A4E' })))
+    socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as ServerMessage
+      if (message.t === 'garden') resolve(message)
+    })
+  })
+  assert.equal(garden.trees[0]?.nickname, '심는이')
+  socket.close()
+  second.closeAllConnections()
+  second.close()
+  for (const client of [planter, viewer, other]) client.socket.close()
 })

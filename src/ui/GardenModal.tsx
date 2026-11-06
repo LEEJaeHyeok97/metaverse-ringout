@@ -55,10 +55,10 @@ export function GardenModal({ onClose }: { onClose: () => void }) {
             </div>
             {plantable > 0 && (
               <p className="pop-in rounded-xl border-2 border-ink bg-[#E3F5E9] px-3 py-2 text-lg font-bold">
-                🌳 심을 나무 {plantable}그루! 대기실 발판 왼쪽 정원의 빈 타일을 눌러 심어요
+                🌳 심을 나무 {plantable}그루! 대기실 발판 왼쪽 함께 정원의 빈 타일을 눌러 심으면 모두에게 보여요
               </p>
             )}
-            {saved.planted.length > 0 && <p className="text-lg">정원에 심은 나무 {'🌳'.repeat(Math.min(saved.planted.length, 12))}</p>}
+            {saved.shared > 0 && <p className="text-lg">함께 정원에 심은 내 나무 {'🌳'.repeat(Math.min(saved.shared, 12))}</p>}
           </>
         )}
         <p className="rounded-xl bg-white/70 px-3 py-2 text-base">

@@ -182,7 +182,7 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
       </p>
       {plantable > 0 && nearInfo === null && !infoOpen && !showPanel && (
         <p className="sketch pop-in absolute bottom-40 left-1/2 -translate-x-1/2 bg-[#E3F5E9] px-4 py-1 text-xl whitespace-nowrap max-sm:bottom-52 max-sm:text-base">
-          🌳 다 자란 나무가 있어요! 발판 왼쪽 <b>정원</b>의 빈 타일을 눌러 심어요
+          🌳 다 자란 나무가 있어요! 발판 왼쪽 <b>함께 정원</b>의 빈 타일을 눌러 심어요
         </p>
       )}
       {nearInfo !== null && !infoOpen && (

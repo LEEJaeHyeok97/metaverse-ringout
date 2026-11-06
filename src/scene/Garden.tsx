@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { ordinal, type PlantedTree } from '../data/garden'
+import type { GardenTreeView } from '../net/connection'
 import { GARDEN, gardenTile, GARDEN_TILES } from '../game/lobby'
 import { COLORS } from '../lib/brand'
 import { Ink, penMaterial } from './ink'
@@ -32,21 +32,23 @@ function easeOutBack(t: number) {
 const sparkleGeometry = new THREE.OctahedronGeometry(0.12)
 const SPARKLE_COUNT = 8
 
-/** 정원에 심은 나무. 막 심었으면 흙이 솟고, 씨앗이 떨어지고, 나무가 쑥 자라는 연출을 한다. */
-function GardenTree({ tree, index }: { tree: PlantedTree; index: number }) {
+/** 정원에 심은 나무. 막 심었으면 흙이 솟고, 씨앗이 떨어지고, 나무가 쑥 자라는 연출을 한다. 심은 사람 이름이 붙는다. */
+function GardenTree({ tree, mine }: { tree: GardenTreeView; mine: boolean }) {
   const spot = gardenTile(tree.tile)
   const mound = useRef<THREE.Mesh>(null)
   const seed = useRef<THREE.Group>(null)
   const trunk = useRef<THREE.Group>(null)
   const canopy = useRef<THREE.Group>(null)
   const sparkles = useRef<THREE.Group>(null)
-  const [fresh, setFresh] = useState(() => Date.now() - tree.at < PLANT_ANIMATION_MS)
+  // 접속하기 전에 심긴 나무(plantedAt 0)는 연출 없이 다 자란 모습으로 그린다.
+  const sinceAt = () => (tree.plantedAt ? Date.now() - tree.plantedAt : Infinity)
+  const [fresh, setFresh] = useState(() => sinceAt() < PLANT_ANIMATION_MS)
   // 나무마다 조금씩 다른 모양
   const lean = ((tree.tile * 37) % 10) / 60 - 0.08
   const size = 0.9 + ((tree.tile * 13) % 5) / 15
 
   useFrame(({ clock }) => {
-    const elapsed = Date.now() - tree.at
+    const elapsed = sinceAt()
     if (fresh && elapsed > PLANT_ANIMATION_MS + 200) setFresh(false)
     const done = elapsed >= PLANT_ANIMATION_MS
     if (mound.current) mound.current.scale.setScalar(done ? 1 : Math.max(0.01, easeOutBack(clamp01(elapsed / MOUND_MS))))
@@ -118,13 +120,19 @@ function GardenTree({ tree, index }: { tree: PlantedTree; index: number }) {
           </mesh>
         ))}
       </group>
-      {fresh && <Label text={`🌳 ${ordinal(index + 1)} 번째 나무!`} position={[0, 4.2, 0]} size={0.4} background="#E3F5E9" />}
+      {fresh ? (
+        <Label text={mine ? '🌳 내 나무를 심었어요!' : `🌳 ${tree.nickname}님이 나무를 심었어요!`} position={[0, 4.2, 0]} size={0.4} background="#E3F5E9" />
+      ) : (
+        <Label text={mine ? `${tree.nickname} (나)` : tree.nickname} position={[0, 3.7, 0]} size={0.26} color={tree.color} background="#FFFFFFCC" />
+      )}
     </group>
   )
 }
 
 type GardenProps = {
-  planted: PlantedTree[]
+  planted: GardenTreeView[]
+  /** 내 닉네임. 내가 심은 나무에 (나)를 붙인다. */
+  myName: string | null
   /** 심을 수 있는 나무 수. 0보다 크면 빈 타일이 반짝인다. */
   plantable: number
   /** 내가 서 있는 타일 */
@@ -132,8 +140,8 @@ type GardenProps = {
   onPlant: (tile: number) => void
 }
 
-/** 광장의 나의 정원. 빈 타일을 누르거나 그 위에서 스페이스를 누르면 다 자란 나무를 심는다. */
-export function GardenPlot({ planted, plantable, standingTile, onPlant }: GardenProps) {
+/** 광장의 함께 정원. 빈 타일을 누르거나 그 위에서 스페이스를 누르면 다 자란 나무를 심고, 모두에게 보인다. */
+export function GardenPlot({ planted, myName, plantable, standingTile, onPlant }: GardenProps) {
   const [hovered, setHovered] = useState<number | null>(null)
   const glow = useRef<THREE.MeshBasicMaterial[]>([])
   const taken = new Set(planted.map((tree) => tree.tile))
@@ -199,15 +207,15 @@ export function GardenPlot({ planted, plantable, standingTile, onPlant }: Garden
           </group>
         )
       })}
-      {planted.map((tree, index) => (
-        <GardenTree key={tree.tile} tree={tree} index={index} />
+      {planted.map((tree) => (
+        <GardenTree key={`${tree.tile}:${tree.at}`} tree={tree} mine={tree.nickname === myName} />
       ))}
       {/* 팻말 */}
       <group position={[GARDEN.x - width / 2 - 0.9, 0, GARDEN.z + depth / 2]}>
         <mesh position={[0, 0.8, 0]} material={penMaterial}>
           <cylinderGeometry args={[0.06, 0.06, 1.6, 6]} />
         </mesh>
-        <Label text={plantable > 0 ? `🌳 나의 정원 · 심을 나무 ${plantable}그루` : '🌳 나의 정원'} position={[0, 2, 0]} size={0.42} background="#E3F5E9" />
+        <Label text={plantable > 0 ? `🌳 함께 정원 · 내가 심을 나무 ${plantable}그루` : `🌳 함께 정원 · ${planted.length}그루`} position={[0, 2, 0]} size={0.42} background="#E3F5E9" />
       </group>
     </group>
   )

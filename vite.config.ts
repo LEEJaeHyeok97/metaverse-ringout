@@ -8,7 +8,7 @@ import { attachRealtime, isLocalOrigin } from './server/realtime.ts'
 function realtimePlugin(): Plugin {
   const attach = (server: PreviewServer | ViteDevServer) => {
     if (!server.httpServer) return
-    attachRealtime(server.httpServer as Server, { path: '/ws', maxPlayers: 100, isOriginAllowed: isLocalOrigin })
+    attachRealtime(server.httpServer as Server, { path: '/ws', maxPlayers: 100, isOriginAllowed: isLocalOrigin, gardenFile: '.data/garden.json' })
   }
   return {
     name: 'ringout-realtime',

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import type { ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage } from './protocol'
+import { recordPlanted } from '../data/garden'
+import type { ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
 
 const RETRY_MS = 2000
 const CLOSE_FULL = 4001
@@ -28,7 +29,11 @@ export type ConnectionState = {
   /** 따릉이 번호 → 탄 사람 */
   bikes: Record<number, number>
   bananas: { id: number; x: number; z: number; owner: number }[]
+  garden: GardenTreeView[]
 }
+
+/** 함께 정원의 나무. plantedAt은 이 화면에서 심는 장면을 본 시각(내 시계)이고, 접속 전에 심긴 나무는 0이다. */
+export type GardenTreeView = SharedTree & { plantedAt: number }
 
 /** 맞거나 아이템에 당한 일. 3D 화면이 효과와 기절을 그리는 데 쓴다. */
 export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'balloon' | 'ufo' | 'warp' }
@@ -56,6 +61,7 @@ function createConnection() {
     error: null,
     bikes: {},
     bananas: [],
+    garden: [],
   }
   const listeners = new Set<() => void>()
   const positions = new Map<number, RemoteState>()
@@ -68,6 +74,7 @@ function createConnection() {
     if (punches.length > 20) punches.shift()
     for (const listener of punchListeners) listener(hit)
   }
+  const plantListeners = new Set<(tile: number) => void>()
   let socket: WebSocket | null = null
   let hello: { nickname: string; color: string } | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -140,6 +147,20 @@ function createConnection() {
       case 'bikes':
         set({ bikes: message.taken })
         return
+      case 'garden': {
+        const known = new Map(state.garden.map((tree) => [tree.tile, tree]))
+        const garden = message.trees.map((tree) => {
+          const before = known.get(tree.tile)
+          if (before && before.at === tree.at) return before
+          return { ...tree, plantedAt: message.planted?.tile === tree.tile ? Date.now() : 0 }
+        })
+        set({ garden })
+        if (message.planted && message.planted.by === state.myId) {
+          recordPlanted()
+          for (const listener of plantListeners) listener(message.planted.tile)
+        }
+        return
+      }
     }
   }
 
@@ -181,6 +202,13 @@ function createConnection() {
       punchListeners.add(listener)
       return () => {
         punchListeners.delete(listener)
+      }
+    },
+    /** 서버가 내 나무를 심어 주면 알려 준다. */
+    onPlanted(listener: (tile: number) => void) {
+      plantListeners.add(listener)
+      return () => {
+        plantListeners.delete(listener)
       }
     },
     start(nickname: string, color: string) {
