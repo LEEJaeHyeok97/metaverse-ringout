@@ -225,6 +225,11 @@ test('물풍선은 가까운 사람에게, 우주선은 1등에게, 귀가 포�
     await sleep(30)
   }
   const leaderId = created.room!.members[0].id + 1
+  // 부스터, 방패 연출은 같은 방 모두에게 간다. 이상한 종류는 무시한다.
+  host.send({ t: 'fx', kind: 'dragon' })
+  host.send({ t: 'fx', kind: 'booster' })
+  const fx = await leader.next('fx')
+  assert.deepEqual([fx.kind, fx.from], ['booster', created.room!.members[0].id])
   host.send({ t: 'item', kind: 'ufo' })
   const ufo = await leader.next('trapped')
   assert.deepEqual([ufo.kind, ufo.to], ['ufo', leaderId])

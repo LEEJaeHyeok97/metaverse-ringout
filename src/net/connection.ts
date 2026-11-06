@@ -37,6 +37,9 @@ export type ConnectionState = {
 /** 함께 정원의 나무. plantedAt은 이 화면에서 심는 장면을 본 시각(내 시계)이고, 접속 전에 심긴 나무는 0이다. */
 export type GardenTreeView = SharedTree & { plantedAt: number }
 
+/** 아이템 궁극기 연출. 바나나는 놓인 자리(x, z)를, 남에게 쓴 아이템은 맞은 사람(to)을 함께 준다. */
+export type FxEvent = { kind: 'booster' | 'shield' | 'banana' | 'balloon' | 'ufo' | 'warp'; from: number; to?: number; x?: number; z?: number; at: number }
+
 /** 맞거나 아이템에 당한 일. 3D 화면이 효과와 기절을 그리는 데 쓴다. */
 export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'balloon' | 'ufo' | 'warp' }
 
@@ -76,6 +79,10 @@ function createConnection() {
     punches.push(hit)
     if (punches.length > 20) punches.shift()
     for (const listener of punchListeners) listener(hit)
+  }
+  const fxListeners = new Set<(fx: FxEvent) => void>()
+  const emitFx = (fx: FxEvent) => {
+    for (const listener of fxListeners) listener(fx)
   }
   const plantListeners = new Set<(tile: number) => void>()
   let socket: WebSocket | null = null
@@ -142,11 +149,18 @@ function createConnection() {
         emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kick ? 'kick' : 'punch' })
         return
       case 'trapped':
+        emitFx({ kind: message.kind, from: message.from, to: message.to, at: performance.now() })
         emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kind })
         return
-      case 'bananas':
-        set({ bananas: message.list })
+      case 'fx':
+        emitFx({ kind: message.kind, from: message.from, at: performance.now() })
         return
+      case 'bananas': {
+        const known = new Set(state.bananas.map((banana) => banana.id))
+        set({ bananas: message.list })
+        for (const banana of message.list) if (!known.has(banana.id)) emitFx({ kind: 'banana', from: banana.owner, x: banana.x, z: banana.z, at: performance.now() })
+        return
+      }
       case 'bikes':
         set({ bikes: message.taken })
         return
@@ -212,6 +226,13 @@ function createConnection() {
       plantListeners.add(listener)
       return () => {
         plantListeners.delete(listener)
+      }
+    },
+    /** 누군가 아이템을 써서 궁극기 연출을 띄워야 할 때 알려 준다. */
+    onFx(listener: (fx: FxEvent) => void) {
+      fxListeners.add(listener)
+      return () => {
+        fxListeners.delete(listener)
       }
     },
     start(nickname: string, color: string) {

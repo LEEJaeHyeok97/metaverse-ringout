@@ -4,6 +4,7 @@ import type { GameInfo } from '../net/connection'
 import type { PlayerInfo } from '../net/protocol'
 import { Lights } from './common'
 import { Bananas, Coffees, ItemBoxes, ParkedBikes } from './game/Items'
+import { ItemFx } from './game/ItemFx'
 import { Movers } from './game/Movers'
 import { PunchEffects } from './PunchEffects'
 import { Runner } from './game/Runner'
@@ -43,6 +44,7 @@ export function GameScene({ me, match, entrants, players }: GameSceneProps) {
       <ItemBoxes />
       <Bananas />
       <PunchEffects curved />
+      <ItemFx />
       <Runner me={me} />
       <RemotePlayers players={players} myId={me?.id ?? null} curved />
     </>

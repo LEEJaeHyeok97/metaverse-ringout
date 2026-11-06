@@ -15,6 +15,7 @@ import { ChatBox } from './ChatBox'
 import { MuteButton } from './MuteButton'
 import { TouchControls } from './TouchJoystick'
 import { useTick } from './useTick'
+import { SkillCutIn } from './SkillCutIn'
 
 function formatMs(ms: number) {
   const seconds = ms / 1000
@@ -307,6 +308,7 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
 
   return (
     <div className="pointer-events-none absolute inset-0 p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
+      <SkillCutIn />
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-2">
           <AlarmCard t={t} />

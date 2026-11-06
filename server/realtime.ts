@@ -102,6 +102,7 @@ type Player = {
   lastKickAt: number
   immuneUntil: number
   lastItemAt: number
+  lastFxAt: number
   lastPlantAt: number
 }
 
@@ -465,6 +466,17 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     }
   }
 
+  /** 부스터와 방패는 효과가 내 화면에만 있으므로, 연출만 같은 방 사람들에게 알린다. */
+  const handleFx = (player: Player, kind: unknown) => {
+    const room = player.room
+    const now = Date.now()
+    if (kind !== 'booster' && kind !== 'shield') return
+    if (!room || room.phase !== 'playing' || !player.inGame || now < room.startAt || room.finished.has(player.id)) return
+    if (now - player.lastFxAt < ITEM_COOLDOWN_MS) return
+    player.lastFxAt = now
+    broadcastGame(room, { t: 'fx', from: player.id, kind })
+  }
+
   const handleSlip = (player: Player, bananaId: unknown) => {
     const room = player.room
     if (!room || room.phase !== 'playing' || !player.inGame) return
@@ -586,6 +598,9 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       case 'item':
         handleItem(player, message.kind, message.target)
         return
+      case 'fx':
+        handleFx(player, message.kind)
+        return
       case 'slip':
         handleSlip(player, message.banana)
         return
@@ -628,6 +643,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       lastKickAt: 0,
       immuneUntil: 0,
       lastItemAt: 0,
+      lastFxAt: 0,
       lastPlantAt: 0,
     }
     players.set(socket, player)

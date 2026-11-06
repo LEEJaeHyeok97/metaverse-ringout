@@ -31,6 +31,9 @@ export const run = {
   pendingBike: null as number | null,
   coffees: new Set<number>(),
   punchUntil: 0,
+  /** 궁극기 연출 때 카메라를 흔든다. */
+  shakeUntil: 0,
+  shakePower: 0,
   kickUntil: 0,
   /** 링아웃 앱에서 목적지를 정했는지. 정하기 전에는 현관이 잠겨 있다. */
   appSet: false,
@@ -65,6 +68,8 @@ export function resetRun(startAt: number, lane: number) {
   run.pendingBike = null
   run.coffees = new Set()
   run.punchUntil = 0
+  run.shakeUntil = 0
+  run.shakePower = 0
   run.kickUntil = 0
   run.appSet = false
   run.appOpen = false
@@ -99,4 +104,11 @@ export function showGuide(id: GuideId) {
   if (run.guidesShown.has(id)) return
   run.guidesShown.add(id)
   run.guide = { id, at: performance.now() }
+}
+
+/** 카메라를 잠깐 흔든다. 더 센 흔들림이 이미 있으면 그대로 둔다. */
+export function shake(power: number, ms: number, now = performance.now()) {
+  if (now < run.shakeUntil && run.shakePower > power) return
+  run.shakePower = power
+  run.shakeUntil = now + ms
 }

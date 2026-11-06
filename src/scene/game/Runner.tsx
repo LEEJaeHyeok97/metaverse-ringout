@@ -239,13 +239,14 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     switch (kind) {
       case 'booster':
         run.boosterUntil = now + BOOSTER_SECONDS * 1000
+        connection.send({ t: 'fx', kind: 'booster' })
         audio.effect('go')
-        toast('🚀 부스터! 슈웅~', 'good')
         break
       case 'shield':
         run.shieldUntil = now + SHIELD_SECONDS * 1000
+        connection.send({ t: 'fx', kind: 'shield' })
         audio.effect('wake')
-        toast(`🛡️ 방패! ${SHIELD_SECONDS}초 동안 공격 한 번을 막아요`, 'good')
+        toast(`🛡️ ${SHIELD_SECONDS}초 동안 공격 한 번을 막아요`, 'good')
         break
       case 'banana':
         connection.send({ t: 'item', kind: 'banana' })
@@ -588,6 +589,12 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       lookGoal.set(node.position.x + forwardX * CAMERA_LOOK, 1, node.position.z + forwardZ * CAMERA_LOOK)
       camera.position.lerp(cameraGoal, 1 - Math.exp(-delta * 5))
       camera.lookAt(lookGoal)
+    }
+    // 궁극기 연출 중에는 화면이 흔들린다. 끝날수록 약해진다.
+    if (now < run.shakeUntil) {
+      const power = run.shakePower * Math.min(1, (run.shakeUntil - now) / 400)
+      camera.position.x += (Math.random() - 0.5) * power
+      camera.position.y += (Math.random() - 0.5) * power
     }
 
     sendTimer.current += delta
