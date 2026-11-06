@@ -54,27 +54,146 @@ export function halfWidthAt(z: number) {
   return YARD_HALF_W + (STREET_HALF_W - YARD_HALF_W) * (t * t * (3 - 2 * t))
 }
 
-// ---- 구불구불한 도로 ----
-/** 구간마다 휘는 정도(1/반지름). 양수면 오른쪽으로 꺾인다. */
-const BENDS: { from: number; to: number; curvature: number }[] = [
-  { from: 40, to: 74, curvature: 1 / 52 },
-  { from: 110, to: 150, curvature: -1 / 48 },
-  { from: 150, to: 194, curvature: 1 / 64 },
-  { from: 224, to: 262, curvature: -1 / 56 },
-  { from: 264, to: 300, curvature: 1 / 44 },
-  { from: 300, to: 332, curvature: -1 / 40 },
+// ---- 맵 ----
+/**
+ * 골목(출발)과 캠퍼스(도착) 사이는 장애물 구간 여섯 개로 이루어진다. 맵마다 구간 순서, 길이 휘는 모양, 날씨가 다르다.
+ * 서버가 게임을 시작할 때 맵을 하나 골라 모두에게 알려 주고, 화면은 applyMap()으로 그 맵을 깐다.
+ */
+export type SectionKind = 'road' | 'pigeons' | 'hurdles' | 'subway' | 'light' | 'scooter'
+
+const SECTION_LENGTH: Record<SectionKind, number> = { road: 34, pigeons: 46, hurdles: 40, subway: 30, light: 40, scooter: 72 }
+const SECTION_NAME: Record<SectionKind, string> = {
+  road: '아침 찻길',
+  pigeons: '비둘기 광장',
+  hurdles: '공사장 허들',
+  subway: '지하철 스크린도어',
+  light: '무궁화 신호등',
+  scooter: '킥보드 언덕',
+}
+/** 골목이 끝나고 장애물 구간이 시작되는 거리 */
+const SECTIONS_FROM = 74
+
+type Bend = { from: number; to: number; curvature: number }
+
+export type Weather = 'none' | 'rain' | 'leaves' | 'snow'
+
+export type MapTheme = {
+  /** 하늘과 길 밖 종이 바닥 */
+  paper: string
+  street: string
+  road: string
+  leaf: string
+  water: string
+  weather: Weather
+}
+
+export type CourseMap = {
+  id: string
+  name: string
+  emoji: string
+  /** 출발 전에 보여 주는 한 줄 소개 */
+  intro: string
+  alley: string
+  sections: SectionKind[]
+  /** 구간마다 휘는 정도(1/반지름). 양수면 오른쪽으로 꺾인다. 캠퍼스 앞(334~)은 곧게 둔다. */
+  bends: Bend[]
+  theme: MapTheme
+}
+
+const BASE_THEME: MapTheme = { paper: '#FBFAF6', street: '#EFEDE6', road: '#D9D6CE', leaf: '#CFE8B9', water: '#BFE3F5', weather: 'none' }
+
+export const MAPS: CourseMap[] = [
+  {
+    id: 'pangyo',
+    name: '판교 출근길',
+    emoji: '☀️',
+    intro: '맑은 아침, 늘 다니던 그 길',
+    alley: '우리 동네 골목',
+    sections: ['road', 'pigeons', 'hurdles', 'subway', 'light', 'scooter'],
+    bends: [
+      { from: 40, to: 74, curvature: 1 / 52 },
+      { from: 110, to: 150, curvature: -1 / 48 },
+      { from: 150, to: 194, curvature: 1 / 64 },
+      { from: 224, to: 262, curvature: -1 / 56 },
+      { from: 264, to: 300, curvature: 1 / 44 },
+      { from: 300, to: 332, curvature: -1 / 40 },
+    ],
+    theme: BASE_THEME,
+  },
+  {
+    id: 'rainy',
+    name: '비 오는 월요일',
+    emoji: '☔',
+    intro: '지하철부터 타고, 웅덩이는 피해서',
+    alley: '빗물 고인 골목',
+    sections: ['subway', 'road', 'scooter', 'pigeons', 'light', 'hurdles'],
+    bends: [
+      { from: 50, to: 110, curvature: 1 / 70 },
+      { from: 130, to: 200, curvature: -1 / 60 },
+      { from: 215, to: 265, curvature: 1 / 55 },
+      { from: 280, to: 330, curvature: -1 / 80 },
+    ],
+    theme: { paper: '#E8EDF2', street: '#DEE3E8', road: '#C5CBD2', leaf: '#B4D4AE', water: '#8FC1E6', weather: 'rain' },
+  },
+  {
+    id: 'autumn',
+    name: '단풍 공원길',
+    emoji: '🍁',
+    intro: '지그재그 공원길, 허들부터 넘어요',
+    alley: '낙엽 쌓인 골목',
+    sections: ['hurdles', 'pigeons', 'light', 'road', 'subway', 'scooter'],
+    bends: [
+      { from: 42, to: 70, curvature: 1 / 40 },
+      { from: 76, to: 104, curvature: -1 / 40 },
+      { from: 120, to: 150, curvature: -1 / 45 },
+      { from: 156, to: 186, curvature: 1 / 45 },
+      { from: 200, to: 236, curvature: 1 / 50 },
+      { from: 244, to: 280, curvature: -1 / 50 },
+      { from: 290, to: 320, curvature: 1 / 60 },
+      { from: 320, to: 332, curvature: -1 / 30 },
+    ],
+    theme: { paper: '#FBF1E1', street: '#F3E6D1', road: '#DCC9AE', leaf: '#F4A261', water: '#BFE3F5', weather: 'leaves' },
+  },
+  {
+    id: 'snow',
+    name: '첫눈 오는 날',
+    emoji: '❄️',
+    intro: '신호등부터 시작! 빙판은 미끄러워요',
+    alley: '눈 쌓인 골목',
+    sections: ['light', 'scooter', 'road', 'hurdles', 'pigeons', 'subway'],
+    bends: [
+      { from: 45, to: 95, curvature: -1 / 60 },
+      { from: 110, to: 170, curvature: 1 / 55 },
+      { from: 185, to: 215, curvature: 1 / 70 },
+      { from: 230, to: 290, curvature: -1 / 50 },
+      { from: 300, to: 332, curvature: 1 / 64 },
+    ],
+    theme: { paper: '#F2F6FA', street: '#FFFFFF', road: '#D8E0E8', leaf: '#E4EEF6', water: '#CDEBFA', weather: 'snow' },
+  },
 ]
+
+export const DEFAULT_MAP_ID = MAPS[0].id
+
+export function mapById(id: string | undefined) {
+  return MAPS.find((map) => map.id === id) ?? MAPS[0]
+}
+
+/** 지난번과 다른 맵을 고른다. */
+export function randomMapId(previous?: string, random = Math.random) {
+  const choices = MAPS.filter((map) => map.id !== previous)
+  return choices[Math.floor(random() * choices.length)].id
+}
+
 const STEP = 0.5
 const TABLE_FROM = -60
 const TABLE_TO = 460
 
-function curvatureAt(s: number) {
-  for (const bend of BENDS) if (s >= bend.from && s < bend.to) return bend.curvature
-  return 0
-}
-
 /** 도로 가운데 선을 미리 따라가 둔 표. [x, z, 방향] */
-const centerline = (() => {
+function buildCenterline(bends: Bend[]) {
+  const curvatureAt = (s: number) => {
+    for (const bend of bends) if (s >= bend.from && s < bend.to) return bend.curvature
+    return 0
+  }
   const count = Math.round((TABLE_TO - TABLE_FROM) / STEP) + 1
   const table = new Float64Array(count * 3)
   let x = 0
@@ -93,7 +212,7 @@ const centerline = (() => {
     angle = next
   }
   return table
-})()
+}
 
 export type Frame = { x: number; z: number; angle: number }
 
@@ -150,32 +269,21 @@ export const COFFEE_SECONDS = 3
 export const COFFEE_REACH = 1.2
 /** 때리기: 닿는 거리, 다시 때릴 수 있을 때까지, 맞은 사람이 기절하는 시간, 기절이 풀린 뒤 봐주는 시간 */
 export const PUNCH_RANGE = 1.9
-export const PUNCH_COOLDOWN_MS = 1500
+export const PUNCH_COOLDOWN_MS = 600
 export const PUNCH_STUN_SECONDS = 1.4
 export const PUNCH_IMMUNE_MS = 3000
+/** 발차기(G): 주먹보다 멀리 닿고, 맞은 사람을 뒤로 날려 보낸다. 기절은 짧다. */
+export const KICK_RANGE = 2.6
+export const KICK_COOLDOWN_MS = 1200
+export const KICK_STUN_SECONDS = 0.9
+/** 날아가는 거리와 시간. 서버의 속도 검사(MAX_SPEED)보다 느리게 둔다. */
+export const KICK_PUSH = 4.5
+export const KICK_PUSH_SECONDS = 0.35
+/** 공중에서 한 번 더 뛸 수 있다. */
+export const MAX_JUMPS = 2
+export const DOUBLE_JUMP_SPEED = 6.5
 
-export const BIKES = [
-  { id: 1, x: -10, z: -20 },
-  { id: 2, x: 9, z: -21 },
-  { id: 3, x: 22, z: -19 },
-  { id: 4, x: -8, z: -112 },
-  { id: 5, x: 8, z: -113 },
-  { id: 6, x: -9, z: -222 },
-  { id: 7, x: 9, z: -222 },
-]
-
-export const COFFEES = [
-  { id: 1, x: -9, z: -46 },
-  { id: 2, x: 10, z: -64 },
-  { id: 3, x: -2, z: -130 },
-  { id: 4, x: 11, z: -146 },
-  { id: 5, x: -11, z: -196 },
-  { id: 6, x: 6, z: -270 },
-  { id: 7, x: -8, z: -318 },
-]
-
-/** 카트라이더처럼 길을 가로지르는 아이템 상자 줄 */
-export const ITEM_ROWS = [-56, -152, -236, -326]
+/** 카트라이더처럼 길을 가로지르는 아이템 상자 줄은 맵마다 layout.itemRows에 있다. */
 export const ITEM_BOX_XS = [-9, -4.5, 0, 4.5, 9]
 export const ITEM_BOX_REACH = 1.2
 export const ITEM_RESPAWN_MS = 4000
@@ -247,20 +355,6 @@ export function ringIndex(seconds: number) {
 }
 
 // ---- 구역 ----
-export type Zone = { name: string; from: number; to: number }
-
-/** 진행 막대와 간판에 쓰는 구역. from이 출발 쪽(큰 z)이다. */
-export const ZONES: Zone[] = [
-  { name: '우리 동네 골목', from: -16, to: -72 },
-  { name: '아침 찻길', from: -74, to: -106 },
-  { name: '비둘기 광장', from: -108, to: -150 },
-  { name: '공사장 허들', from: -154, to: -192 },
-  { name: '지하철 스크린도어', from: -194, to: -222 },
-  { name: '무궁화 신호등', from: -224, to: -262 },
-  { name: '킥보드 언덕', from: -264, to: -334 },
-  { name: '우테코 캠퍼스', from: -336, to: FINISH_Z },
-]
-
 export function zoneAt(z: number) {
   return ZONES.find((zone) => z <= zone.from && z >= zone.to) ?? null
 }
@@ -269,39 +363,9 @@ export function zoneAt(z: number) {
 export type Circle = { x: number; z: number; r: number }
 export type Box = { x: number; z: number; hx: number; hz: number }
 
-export const PUDDLES: Circle[] = [
-  { x: -18, z: -26, r: 3 },
-  { x: 4, z: -30, r: 3.2 },
-  { x: 20, z: -34, r: 2.8 },
-  { x: -6, z: -44, r: 3 },
-  { x: 8, z: -52, r: 2.6 },
-  { x: -9, z: -62, r: 2.8 },
-  { x: 6, z: -68, r: 2.4 },
-  { x: 0, z: -126, r: 2.4 },
-  { x: -8, z: -300, r: 2.6 },
-]
-
-/** 쓰레기통, 화분, 덤불처럼 부딪히면 막히기만 하는 것 */
-export const PROPS: (Circle & { kind: 'bin' | 'pot' | 'bush' | 'cone' })[] = [
-  { x: -12, z: -24, r: 0.8, kind: 'bin' },
-  { x: 14, z: -27, r: 0.8, kind: 'pot' },
-  { x: -2, z: -36, r: 0.8, kind: 'bin' },
-  { x: 11, z: -42, r: 0.9, kind: 'pot' },
-  { x: -11, z: -52, r: 0.9, kind: 'pot' },
-  { x: 2, z: -60, r: 0.8, kind: 'bin' },
-  { x: -7, z: -158, r: 0.6, kind: 'cone' },
-  { x: 6, z: -164, r: 0.6, kind: 'cone' },
-  { x: -2, z: -172, r: 0.6, kind: 'cone' },
-  { x: 10, z: -180, r: 0.6, kind: 'cone' },
-  { x: -10, z: -188, r: 0.6, kind: 'cone' },
-  { x: -9, z: -268, r: 1.4, kind: 'bush' },
-  { x: 5, z: -284, r: 1.4, kind: 'bush' },
-  { x: -3, z: -302, r: 1.4, kind: 'bush' },
-  { x: 9, z: -318, r: 1.4, kind: 'bush' },
-]
+export type Prop = Circle & { kind: 'bin' | 'pot' | 'bush' | 'cone' }
 
 /** 뛰어넘어야 하는 공사장 허들. 길 전체를 가로지른다. */
-export const HURDLE_ZS = [-160, -168, -176, -184]
 export const HURDLE_HALF_DEPTH = 0.3
 export const HURDLE_HEIGHT = 0.7
 
@@ -316,18 +380,6 @@ function wrap(value: number) {
 export type Vehicle = { kind: 'car' | 'bus' | 'scooter'; x: number; z: number; hx: number; hz: number; dir: 1 | -1; color: number }
 
 type VehicleLane = { kind: Vehicle['kind']; z: number; speed: number; offsets: number[]; hx: number; hz: number }
-
-const VEHICLE_LANES: VehicleLane[] = [
-  { kind: 'car', z: -80, speed: 12, offsets: [0, 24], hx: 2.3, hz: 1.1 },
-  { kind: 'bus', z: -89, speed: -10, offsets: [6, 30], hx: 3.6, hz: 1.4 },
-  { kind: 'car', z: -98, speed: 15, offsets: [12, 36], hx: 2.3, hz: 1.1 },
-  { kind: 'scooter', z: -276, speed: 18, offsets: [0, 24], hx: 0.9, hz: 0.5 },
-  { kind: 'scooter', z: -292, speed: -16, offsets: [10, 34], hx: 0.9, hz: 0.5 },
-  { kind: 'scooter', z: -310, speed: 20, offsets: [4, 28], hx: 0.9, hz: 0.5 },
-]
-
-export const ROAD_ZS = VEHICLE_LANES.filter((lane) => lane.kind !== 'scooter').map((lane) => lane.z)
-export const SCOOTER_ZS = VEHICLE_LANES.filter((lane) => lane.kind === 'scooter').map((lane) => lane.z)
 
 export function vehiclesAt(seconds: number): Vehicle[] {
   const t = Math.max(0, seconds)
@@ -355,7 +407,7 @@ export function pigeonsAt(seconds: number) {
   const t = Math.max(0, seconds)
   return Array.from({ length: PIGEON_COUNT }, (_, i) => {
     const cx = -10 + ((i * 37) % 21)
-    const cz = -112 - ((i * 13) % 34)
+    const cz = PIGEON_FROM - ((i * 13) % 34)
     const speed = 0.7 + (i % 4) * 0.3
     const phase = i * 1.7
     const x = cx + Math.sin(t * speed + phase) * 4
@@ -366,7 +418,6 @@ export function pigeonsAt(seconds: number) {
 }
 
 // 스크린도어. 문마다 열리는 때가 달라 언제나 어딘가는 열려 있다.
-export const SUBWAY_Z = -206
 export const SUBWAY_HALF_DEPTH = 0.5
 export const SUBWAY_DOOR_XS = [-9, 0, 9]
 export const SUBWAY_DOOR_HALF = 2
@@ -398,7 +449,6 @@ export function subwayWalls(seconds: number): Box[] {
 }
 
 // 무궁화 신호등. 빨간불에 움직이다 걸리면 구역 처음으로 돌아간다.
-export const LIGHT_ZONE = { from: -228, to: -260 }
 const LIGHT_CYCLE = 7
 /** 빨간불이 켜진 뒤 멈출 여유 */
 export const LIGHT_GRACE = 0.25
@@ -464,3 +514,218 @@ export function confine(position: { x: number; z: number }, previous: { x: numbe
     position.z = Math.max(position.z, WORLD_MIN_Z)
   }
 }
+
+// ---- 맵 배치 ----
+export type Zone = { name: string; from: number; to: number }
+
+/** 한 맵의 장애물 배치. 모두 코스 좌표다. */
+export type CourseLayout = {
+  zones: Zone[]
+  puddles: Circle[]
+  props: Prop[]
+  hurdleZs: number[]
+  vehicleLanes: VehicleLane[]
+  /** 비둘기 떼가 시작하는 z */
+  pigeonFrom: number
+  subwayZ: number
+  lightZone: { from: number; to: number }
+  bikes: { id: number; x: number; z: number }[]
+  coffees: { id: number; x: number; z: number }[]
+  itemRows: number[]
+}
+
+/** 출발 골목. 모든 맵에 같다. */
+const ALLEY = {
+  puddles: [
+    { x: -18, z: -26, r: 3 },
+    { x: 4, z: -30, r: 3.2 },
+    { x: 20, z: -34, r: 2.8 },
+    { x: -6, z: -44, r: 3 },
+    { x: 8, z: -52, r: 2.6 },
+    { x: -9, z: -62, r: 2.8 },
+    { x: 6, z: -68, r: 2.4 },
+  ],
+  props: [
+    { x: -12, z: -24, r: 0.8, kind: 'bin' },
+    { x: 14, z: -27, r: 0.8, kind: 'pot' },
+    { x: -2, z: -36, r: 0.8, kind: 'bin' },
+    { x: 11, z: -42, r: 0.9, kind: 'pot' },
+    { x: -11, z: -52, r: 0.9, kind: 'pot' },
+    { x: 2, z: -60, r: 0.8, kind: 'bin' },
+  ] as Prop[],
+  bikes: [
+    { x: -10, z: -20 },
+    { x: 9, z: -21 },
+    { x: 22, z: -19 },
+  ],
+  coffees: [
+    { x: -9, z: -46 },
+    { x: 10, z: -64 },
+  ],
+  itemRows: [-56],
+}
+
+type Spot = { x: number; d: number }
+
+/** 구간 안 배치. d는 구간 시작부터 앞으로 간 거리다. */
+const SECTION_CONTENT: Record<
+  SectionKind,
+  {
+    puddles?: (Spot & { r: number })[]
+    props?: (Spot & { r: number; kind: Prop['kind'] })[]
+    hurdles?: number[]
+    lanes?: (Omit<VehicleLane, 'z'> & { d: number })[]
+    bikes?: Spot[]
+    coffees?: Spot[]
+    itemRows?: number[]
+  }
+> = {
+  road: {
+    lanes: [
+      { kind: 'car', d: 6, speed: 12, offsets: [0, 24], hx: 2.3, hz: 1.1 },
+      { kind: 'bus', d: 15, speed: -10, offsets: [6, 30], hx: 3.6, hz: 1.4 },
+      { kind: 'car', d: 24, speed: 15, offsets: [12, 36], hx: 2.3, hz: 1.1 },
+    ],
+  },
+  pigeons: {
+    puddles: [{ x: 0, d: 18, r: 2.4 }],
+    bikes: [
+      { x: -8, d: 4 },
+      { x: 8, d: 5 },
+    ],
+    coffees: [
+      { x: -2, d: 22 },
+      { x: 11, d: 38 },
+    ],
+    itemRows: [44],
+  },
+  hurdles: {
+    hurdles: [6, 14, 22, 30],
+    props: [
+      { x: -7, d: 4, r: 0.6, kind: 'cone' },
+      { x: 6, d: 10, r: 0.6, kind: 'cone' },
+      { x: -2, d: 18, r: 0.6, kind: 'cone' },
+      { x: 10, d: 26, r: 0.6, kind: 'cone' },
+      { x: -10, d: 34, r: 0.6, kind: 'cone' },
+    ],
+  },
+  subway: {
+    coffees: [{ x: -11, d: 2 }],
+    bikes: [
+      { x: -9, d: 28 },
+      { x: 9, d: 28 },
+    ],
+  },
+  light: { itemRows: [12] },
+  scooter: {
+    lanes: [
+      { kind: 'scooter', d: 12, speed: 18, offsets: [0, 24], hx: 0.9, hz: 0.5 },
+      { kind: 'scooter', d: 28, speed: -16, offsets: [10, 34], hx: 0.9, hz: 0.5 },
+      { kind: 'scooter', d: 46, speed: 20, offsets: [4, 28], hx: 0.9, hz: 0.5 },
+    ],
+    props: [
+      { x: -9, d: 4, r: 1.4, kind: 'bush' },
+      { x: 5, d: 20, r: 1.4, kind: 'bush' },
+      { x: -3, d: 38, r: 1.4, kind: 'bush' },
+      { x: 9, d: 54, r: 1.4, kind: 'bush' },
+    ],
+    puddles: [{ x: -8, d: 36, r: 2.6 }],
+    coffees: [
+      { x: 6, d: 6 },
+      { x: -8, d: 54 },
+    ],
+    itemRows: [62],
+  },
+}
+
+/** 맵의 구간 순서대로 장애물을 늘어놓는다. */
+export function buildLayout(map: CourseMap): CourseLayout {
+  const layout: CourseLayout = {
+    zones: [{ name: map.alley, from: -16, to: -(SECTIONS_FROM - 2) }],
+    puddles: [...ALLEY.puddles],
+    props: [...ALLEY.props],
+    hurdleZs: [],
+    vehicleLanes: [],
+    pigeonFrom: 0,
+    subwayZ: 0,
+    lightZone: { from: 0, to: 0 },
+    bikes: [],
+    coffees: [],
+    itemRows: [...ALLEY.itemRows],
+  }
+  const bikes = [...ALLEY.bikes]
+  const coffees = [...ALLEY.coffees]
+  let start = SECTIONS_FROM
+  for (const kind of map.sections) {
+    const z = (d: number) => -(start + d)
+    const content = SECTION_CONTENT[kind]
+    layout.zones.push({ name: SECTION_NAME[kind], from: z(0), to: z(SECTION_LENGTH[kind] - 2) })
+    for (const { x, d, r } of content.puddles ?? []) layout.puddles.push({ x, z: z(d), r })
+    for (const { x, d, r, kind: prop } of content.props ?? []) layout.props.push({ x, z: z(d), r, kind: prop })
+    for (const d of content.hurdles ?? []) layout.hurdleZs.push(z(d))
+    for (const { d, ...lane } of content.lanes ?? []) layout.vehicleLanes.push({ ...lane, z: z(d) })
+    for (const { x, d } of content.bikes ?? []) bikes.push({ x, z: z(d) })
+    for (const { x, d } of content.coffees ?? []) coffees.push({ x, z: z(d) })
+    for (const d of content.itemRows ?? []) layout.itemRows.push(z(d))
+    if (kind === 'pigeons') layout.pigeonFrom = z(4)
+    if (kind === 'subway') layout.subwayZ = z(12)
+    if (kind === 'light') layout.lightZone = { from: z(4), to: z(36) }
+    start += SECTION_LENGTH[kind]
+  }
+  layout.zones.push({ name: '우테코 캠퍼스', from: -(start), to: FINISH_Z })
+  layout.bikes = bikes.map((bike, index) => ({ id: index + 1, ...bike }))
+  layout.coffees = coffees.map((coffee, index) => ({ id: index + 1, ...coffee }))
+  return layout
+}
+
+const layouts = new Map<string, CourseLayout>()
+
+/** 맵 배치를 한 번만 만들어 둔다. 서버는 방마다 이걸로 따릉이 자리를 확인한다. */
+export function layoutOf(mapId: string | undefined) {
+  const map = mapById(mapId)
+  let layout = layouts.get(map.id)
+  if (!layout) {
+    layout = buildLayout(map)
+    layouts.set(map.id, layout)
+  }
+  return layout
+}
+
+// 지금 화면에 깔린 맵. 다른 파일은 아래 이름들을 그대로 읽고, applyMap()이 바꾸면 새 맵 값이 보인다.
+export let activeMap: CourseMap = MAPS[0]
+let centerline = buildCenterline(activeMap.bends)
+let VEHICLE_LANES: VehicleLane[] = []
+let PIGEON_FROM = 0
+export let ZONES: Zone[] = []
+export let PUDDLES: Circle[] = []
+export let PROPS: Prop[] = []
+export let HURDLE_ZS: number[] = []
+export let ROAD_ZS: number[] = []
+export let SCOOTER_ZS: number[] = []
+export let SUBWAY_Z = 0
+export let LIGHT_ZONE = { from: 0, to: 0 }
+export let BIKES: CourseLayout['bikes'] = []
+export let COFFEES: CourseLayout['coffees'] = []
+export let ITEM_ROWS: number[] = []
+
+/** 이 맵으로 코스를 바꾼다. 게임 화면을 그리기 전에 부른다. */
+export function applyMap(mapId: string | undefined) {
+  activeMap = mapById(mapId)
+  const layout = layoutOf(activeMap.id)
+  centerline = buildCenterline(activeMap.bends)
+  VEHICLE_LANES = layout.vehicleLanes
+  PIGEON_FROM = layout.pigeonFrom
+  ZONES = layout.zones
+  PUDDLES = layout.puddles
+  PROPS = layout.props
+  HURDLE_ZS = layout.hurdleZs
+  ROAD_ZS = VEHICLE_LANES.filter((lane) => lane.kind !== 'scooter').map((lane) => lane.z)
+  SCOOTER_ZS = VEHICLE_LANES.filter((lane) => lane.kind === 'scooter').map((lane) => lane.z)
+  SUBWAY_Z = layout.subwayZ
+  LIGHT_ZONE = layout.lightZone
+  BIKES = layout.bikes
+  COFFEES = layout.coffees
+  ITEM_ROWS = layout.itemRows
+}
+
+applyMap(DEFAULT_MAP_ID)

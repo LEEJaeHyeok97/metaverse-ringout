@@ -36,7 +36,7 @@ export function Lights() {
 }
 
 /** 줄기는 펜 선 한 줄, 잎은 동그라미 하나인 나무 */
-export function Tree({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
+export function Tree({ position, scale = 1, color = COLORS.leaf }: { position: [number, number, number]; scale?: number; color?: string }) {
   return (
     <group position={position} scale={scale}>
       <mesh position={[0, 0.9, 0]}>
@@ -45,7 +45,7 @@ export function Tree({ position, scale = 1 }: { position: [number, number, numbe
       </mesh>
       <mesh position={[0, 2.3, 0]}>
         <sphereGeometry args={[1.1, 16, 12]} />
-        <Ink color={COLORS.leaf} />
+        <Ink color={color} />
       </mesh>
     </group>
   )

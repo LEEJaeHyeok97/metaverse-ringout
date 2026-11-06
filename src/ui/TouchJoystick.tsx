@@ -1,5 +1,5 @@
 import { useRef, type PointerEvent } from 'react'
-import { input, pressAction, pressItem, pressPunch } from '../scene/input'
+import { input, pressAction, pressItem, pressKick, pressPunch } from '../scene/input'
 
 const TRAVEL = 40
 const DEAD_ZONE = 0.12
@@ -77,6 +77,19 @@ export function TouchControls({ actionLabel = '점프', punch = true, item = nul
           }}
         >
           👊
+        </button>
+      )}
+      {punch && (
+        <button
+          type="button"
+          aria-label="발차기"
+          className="sketch-button absolute right-[calc(6.5rem+env(safe-area-inset-right))] bottom-[calc(6.5rem+env(safe-area-inset-bottom))] hidden size-14 touch-none rounded-full bg-accent-soft text-2xl select-none pointer-coarse:block"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            pressKick()
+          }}
+        >
+          🦶
         </button>
       )}
       {item && (

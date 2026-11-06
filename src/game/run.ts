@@ -1,4 +1,5 @@
 import { growth } from '../data/garden'
+import * as course from './course'
 import type { ItemKind } from './course'
 import type { GuideId } from '../data/ringout'
 
@@ -30,6 +31,7 @@ export const run = {
   pendingBike: null as number | null,
   coffees: new Set<number>(),
   punchUntil: 0,
+  kickUntil: 0,
   /** 링아웃 앱에서 목적지를 정했는지. 정하기 전에는 현관이 잠겨 있다. */
   appSet: false,
   appOpen: false,
@@ -63,6 +65,7 @@ export function resetRun(startAt: number, lane: number) {
   run.pendingBike = null
   run.coffees = new Set()
   run.punchUntil = 0
+  run.kickUntil = 0
   run.appSet = false
   run.appOpen = false
   run.nearDesk = false
@@ -88,7 +91,8 @@ export function toast(text: string, tone: Toast['tone'] = 'bad') {
 }
 
 // 개발 서버에서만 브라우저 자동 점검이 진행 상태를 읽을 수 있게 열어 둔다.
-if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds }
+// 브라우저 자동 점검이 지금 맵의 장애물 자리를 읽을 수 있게 한다.
+if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds, course: () => ({ map: course.activeMap.id, light: course.LIGHT_ZONE, hurdles: course.HURDLE_ZS }) }
 
 /** 링아웃 기능을 설명하는 가이드 카드를 띄운다. 한 판에 같은 가이드는 한 번만 보여 준다. */
 export function showGuide(id: GuideId) {

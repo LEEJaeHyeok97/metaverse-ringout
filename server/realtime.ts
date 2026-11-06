@@ -12,9 +12,13 @@ import {
   STREET_HALF_W,
   WALK_SPEED,
   RIDE_FACTOR,
-  BIKES,
+  layoutOf,
+  randomMapId,
   BIKE_REACH,
   PUNCH_RANGE,
+  KICK_RANGE,
+  KICK_COOLDOWN_MS,
+  KICK_STUN_SECONDS,
   PUNCH_COOLDOWN_MS,
   PUNCH_STUN_SECONDS,
   PUNCH_IMMUNE_MS,
@@ -95,6 +99,7 @@ type Player = {
   chatWindowStart: number
   chatCount: number
   lastPunchAt: number
+  lastKickAt: number
   immuneUntil: number
   lastItemAt: number
   lastPlantAt: number
@@ -114,6 +119,8 @@ type Room = {
   bikes: Map<number, number>
   bananas: { id: number; x: number; z: number; owner: number }[]
   nextBanana: number
+  /** 이번 판의 맵. 출발 카운트다운을 시작할 때 고른다. */
+  mapId: string
   timers: ReturnType<typeof setTimeout>[]
 }
 
@@ -282,7 +289,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       member.a = ANIMS.indexOf('sleep')
     })
     const lanes = Object.fromEntries(room.lanes)
-    for (const member of room.members) send(member, { t: 'start', startIn: gameCountdownMs, lanes })
+    for (const member of room.members) send(member, { t: 'start', startIn: gameCountdownMs, lanes, map: room.mapId })
     sendGameRoster(room)
     broadcastRoom(room)
     lobbyRosterDirty = true
@@ -292,7 +299,9 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const beginCountdown = (room: Room) => {
     if (room.phase !== 'waiting') return
     room.phase = 'countdown'
-    for (const member of room.members) send(member, { t: 'countdown', startIn: lobbyCountdownMs })
+    // 같은 방에서 연달아 하면 지난 판과 다른 맵이 나온다.
+    room.mapId = randomMapId(room.mapId || undefined)
+    for (const member of room.members) send(member, { t: 'countdown', startIn: lobbyCountdownMs, map: room.mapId })
     broadcastRoom(room)
     room.timers.push(setTimeout(() => startGame(room), lobbyCountdownMs))
   }
@@ -344,6 +353,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       bikes: new Map(),
       bananas: [],
       nextBanana: 1,
+      mapId: '',
       timers: [],
     }
     rooms.set(room.code, room)
@@ -388,25 +398,26 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   /** 같은 공간(광장, 또는 같은 방의 게임)에 있는 사람들 */
   const audienceOf = (player: Player) => (player.inGame && player.room ? player.room.members.filter((member) => member.inGame) : lobbyPlayers())
 
-  const handlePunch = (player: Player, targetId: unknown) => {
+  const handlePunch = (player: Player, targetId: unknown, kick: boolean) => {
     const now = Date.now()
-    if (now - player.lastPunchAt < PUNCH_COOLDOWN_MS) return
+    if (now - (kick ? player.lastKickAt : player.lastPunchAt) < (kick ? KICK_COOLDOWN_MS : PUNCH_COOLDOWN_MS)) return
     const audience = audienceOf(player)
     const target = audience.find((member) => member.id === targetId)
     if (!target || target === player) return
     if (player.inGame && (player.room?.phase !== 'playing' || now < player.room.startAt)) return
-    if (Math.hypot(target.x - player.x, target.z - player.z) > PUNCH_RANGE + REACH_SLACK) return
-    player.lastPunchAt = now
+    if (Math.hypot(target.x - player.x, target.z - player.z) > (kick ? KICK_RANGE : PUNCH_RANGE) + REACH_SLACK) return
+    if (kick) player.lastKickAt = now
+    else player.lastPunchAt = now
     // 기절해 있는 동안과 일어난 직후에는 다시 맞지 않는다.
     if (now < target.immuneUntil) return
-    target.immuneUntil = now + PUNCH_STUN_SECONDS * 1000 + PUNCH_IMMUNE_MS
-    for (const member of audience) send(member, { t: 'punched', from: player.id, to: target.id })
+    target.immuneUntil = now + (kick ? KICK_STUN_SECONDS : PUNCH_STUN_SECONDS) * 1000 + PUNCH_IMMUNE_MS
+    for (const member of audience) send(member, { t: 'punched', from: player.id, to: target.id, kick })
   }
 
   const handleRide = (player: Player, bikeId: unknown) => {
     const room = player.room
     if (!room || room.phase !== 'playing' || !player.inGame || Date.now() < room.startAt) return
-    const bike = BIKES.find((candidate) => candidate.id === bikeId)
+    const bike = layoutOf(room.mapId).bikes.find((candidate) => candidate.id === bikeId)
     if (!bike || room.bikes.has(bike.id)) return
     if (Math.hypot(bike.x - player.x, bike.z - player.z) > BIKE_REACH + REACH_SLACK) return
     room.bikes.set(bike.id, player.id)
@@ -567,7 +578,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         handleFinish(player)
         return
       case 'punch':
-        handlePunch(player, message.target)
+        handlePunch(player, message.target, message.kick === true)
         return
       case 'ride':
         handleRide(player, message.bike)
@@ -614,6 +625,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       chatWindowStart: 0,
       chatCount: 0,
       lastPunchAt: 0,
+      lastKickAt: 0,
       immuneUntil: 0,
       lastItemAt: 0,
       lastPlantAt: 0,

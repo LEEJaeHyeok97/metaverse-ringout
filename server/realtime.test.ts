@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
-import { BIKES, FINISH_Z } from '../src/game/course.ts'
+import { BIKES, FINISH_Z, MAPS } from '../src/game/course.ts'
 import { gardenTile } from '../src/game/lobby.ts'
 import type { ServerMessage } from '../src/net/protocol.ts'
 import { attachRealtime } from './realtime.ts'
@@ -77,6 +77,9 @@ test('다섯 명이 빠른 참가로 모이면 자동으로 시작하고, 도착
     await client.next('room', (m) => m.room !== null)
   }
   const starts = await Promise.all(clients.map((client) => client.next('start')))
+  // 모두 같은 맵을 받는다.
+  assert.ok(MAPS.some((map) => map.id === starts[0].map))
+  assert.ok(starts.every((start) => start.map === starts[0].map))
   for (const client of clients) client.inbox.length = 0
   const lanes = Object.values(starts[0].lanes).sort()
   assert.deepEqual(lanes, [0, 1, 2, 3, 4])
@@ -295,4 +298,25 @@ test('정원 가까이에서 빈 타일에 심은 나무는 모두에게 보이�
   second.closeAllConnections()
   second.close()
   for (const client of [planter, viewer, other]) client.socket.close()
+})
+
+test('발차기는 주먹보다 멀리 닿고, 주먹과 따로 쿨타임이 돈다', async () => {
+  const a = await connect('차는이')
+  const b = await connect('차이는이')
+  a.send({ t: 'move', x: 0, y: 0, z: 0, h: 0, a: 0 })
+  b.send({ t: 'move', x: 3.3, y: 0, z: 0, h: 0, a: 0 })
+  await sleep(50)
+  const bId = await idOf(a, '차이는이')
+
+  // 주먹은 닿지 않는 거리다.
+  a.send({ t: 'punch', target: bId })
+  await sleep(100)
+  assert.equal(b.inbox.some((m) => m.t === 'punched'), false)
+
+  // 발차기는 닿고, 차였다고 알린다.
+  a.send({ t: 'punch', target: bId, kick: true })
+  const hit = await b.next('punched')
+  assert.equal(hit.kick, true)
+  assert.equal(hit.to, bId)
+  for (const client of [a, b]) client.socket.close()
 })

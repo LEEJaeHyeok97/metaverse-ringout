@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
+import { applyMap } from './game/course'
 import { resetRun } from './game/run'
 import { audio } from './lib/audio'
 import { connection, useConnection, type GameInfo } from './net/connection'
@@ -69,6 +70,8 @@ export function App() {
     }
     const match = connection.getState().match!
     const { myId, room } = connection.getState()
+    // 게임 화면을 그리기 전에 이번 판의 맵으로 코스를 바꾼다.
+    applyMap(match.map)
     resetRun(match.startAt, myId !== null ? (match.lanes[myId] ?? 2) : 2)
     setActiveMatch({ match, entrants: room?.members ?? [] })
     setPanelOpen(false)

@@ -32,6 +32,11 @@ import {
   ITEM_RESPAWN_MS,
   ITEM_ROWS,
   JUMP_SPEED,
+  DOUBLE_JUMP_SPEED,
+  MAX_JUMPS,
+  KICK_PUSH,
+  KICK_PUSH_SECONDS,
+  KICK_STUN_SECONDS,
   laneX,
   LATE_SECONDS,
   LIGHT_GRACE,
@@ -129,9 +134,12 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
   const pos = useRef(new THREE.Vector3(bedSpot(run.lane).x, BED_HEIGHT, bedSpot(run.lane).z))
   const heading = useRef(Math.PI)
   const velocity = useRef(new THREE.Vector2())
-  const jump = useRef({ y: 0, speed: 0 })
+  const jump = useRef({ y: 0, speed: 0, count: 0 })
+  /** 발차기에 맞아 날아가는 속도(코스 좌표)와 끝나는 시각 */
+  const knock = useRef({ x: 0, z: 0, until: 0 })
   const lastAction = useRef(input.actionCount)
   const lastPunch = useRef(input.punchCount)
+  const lastKick = useRef(input.kickCount)
   const lastItem = useRef(input.itemCount)
   const lastRing = useRef(-1)
   const stunAnim = useRef<Anim>('down')
@@ -150,7 +158,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       connection.onPunch((hit: HitEvent) => {
         const myId = connection.getState().myId
         if (hit.from === myId && hit.to !== myId) {
-          const done = { punch: '퍽!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!' }[hit.kind]
+          const done = { punch: '퍽!', kick: '👟 뻥!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!' }[hit.kind]
           audio.effect('hit')
           toast(`${done} (${nicknameOf(hit.to)})`, 'info')
         }
@@ -174,6 +182,19 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         if (hit.kind === 'punch') {
           stun('down', PUNCH_STUN_SECONDS)
           toast(`${who}님에게 맞았어요!`)
+        } else if (hit.kind === 'kick') {
+          stun('down', KICK_STUN_SECONDS)
+          // 찬 사람에게서 멀어지는 쪽으로 날아간다. 찬 사람 위치를 모르면 뒤(집 쪽)로 날아간다.
+          const from = connection.positions.get(hit.from)
+          const p = pos.current
+          let dx = from ? p.x - from.x : 0
+          let dz = from ? p.z - from.z : 1
+          const length = Math.hypot(dx, dz) || 1
+          dx /= length
+          dz /= length
+          const speed = KICK_PUSH / KICK_PUSH_SECONDS
+          knock.current = { x: dx * speed, z: dz * speed, until: now + KICK_PUSH_SECONDS * 1000 }
+          toast(`👟 ${who}님의 발차기에 날아갔어요!`)
         } else if (hit.kind === 'balloon') {
           stun('trapped', BALLOON_SECONDS)
           toast(`💧 ${who}님의 물풍선! 스페이스 연타로 탈출`)
@@ -250,6 +271,8 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     lastAction.current = input.actionCount
     const punched = input.punchCount !== lastPunch.current && !blocked
     lastPunch.current = input.punchCount
+    const kicked = input.kickCount !== lastKick.current && !blocked
+    lastKick.current = input.kickCount
     const itemPressed = input.itemCount !== lastItem.current && !blocked
     lastItem.current = input.itemCount
 
@@ -353,6 +376,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       if (itemPressed && run.item && !stunned) useItem(p, now)
 
       if (punched && !stunned && tryPunch(p.x, p.z, heading.current)) run.punchUntil = now + 300
+      if (kicked && !stunned && !riding && tryPunch(p.x, p.z, heading.current, true)) run.kickUntil = now + 400
 
       // 물풍선에 갇혔으면 스페이스를 연타해 빨리 빠져나온다.
       if (pressed && stunned && stunAnim.current === 'trapped') run.stunUntil -= BALLOON_ESCAPE_MS
@@ -369,6 +393,10 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       velocity.current.y += (-move.y * speed - velocity.current.y) * blend
       p.x += velocity.current.x * delta
       p.z += velocity.current.y * delta
+      if (now < knock.current.until) {
+        p.x += knock.current.x * delta
+        p.z += knock.current.z * delta
+      }
 
       if (pressed && !stunned && !riding) {
         if (run.nearDesk) {
@@ -380,13 +408,22 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
           connection.send({ t: 'ride', bike: run.nearBike })
         } else if (jump.current.y === 0) {
           jump.current.speed = JUMP_SPEED
+          jump.current.count = 1
+          audio.effect('jump')
+        } else if (jump.current.count < MAX_JUMPS) {
+          // 2단 점프: 공중에서 한 번 더 뛴다.
+          jump.current.speed = DOUBLE_JUMP_SPEED
+          jump.current.count += 1
           audio.effect('jump')
         }
       }
       if (jump.current.y > 0 || jump.current.speed > 0) {
         jump.current.speed -= GRAVITY * delta
         jump.current.y = Math.max(0, jump.current.y + jump.current.speed * delta)
-        if (jump.current.y === 0) jump.current.speed = 0
+        if (jump.current.y === 0) {
+          jump.current.speed = 0
+          jump.current.count = 0
+        }
       }
       p.y = jump.current.y
 
@@ -436,6 +473,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         heading.current += turn * (1 - Math.exp(-delta * 14))
       }
       if (now < run.stunUntil) anim = stunAnim.current
+      else if (now < run.kickUntil) anim = 'kick'
       else if (now < run.punchUntil) anim = 'punch'
       else if (now < run.rideUntil) anim = 'ride'
       else if (p.y > 0) anim = 'jump'

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { COLORS } from '../lib/brand'
+import { activeMap } from '../game/course'
 import type { GameInfo } from '../net/connection'
 import type { PlayerInfo } from '../net/protocol'
 import { Lights } from './common'
@@ -7,6 +7,7 @@ import { Bananas, Coffees, ItemBoxes, ParkedBikes } from './game/Items'
 import { Movers } from './game/Movers'
 import { PunchEffects } from './PunchEffects'
 import { Runner } from './game/Runner'
+import { Weather } from './game/Weather'
 import { World } from './game/World'
 import { RemotePlayers } from './Players'
 
@@ -31,10 +32,11 @@ export function GameScene({ me, match, entrants, players }: GameSceneProps) {
 
   return (
     <>
-      <color attach="background" args={[COLORS.paper]} />
-      <fog attach="fog" args={[COLORS.paper, 45, 95]} />
+      <color attach="background" args={[activeMap.theme.paper]} />
+      <fog attach="fog" args={[activeMap.theme.paper, 45, 95]} />
       <Lights />
       <World owners={owners} />
+      <Weather kind={activeMap.theme.weather} />
       <Movers />
       <ParkedBikes />
       <Coffees />

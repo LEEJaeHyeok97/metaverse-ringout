@@ -7,7 +7,7 @@ import { audio } from '../lib/audio'
 import { useLogoImage } from '../ui/art/RingoutLogo'
 import { BRAND, COLORS, FONT } from '../lib/brand'
 import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH } from '../game/lobby'
-import { GRAVITY, JUMP_SPEED, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
+import { DOUBLE_JUMP_SPEED, GRAVITY, JUMP_SPEED, KICK_PUSH, KICK_PUSH_SECONDS, KICK_STUN_SECONDS, MAX_JUMPS, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
 import { nicknameOf, tryPunch } from './combat'
 import { PunchEffects } from './PunchEffects'
 import { connection, useConnection } from '../net/connection'
@@ -231,15 +231,18 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
   const group = useRef<THREE.Group>(null)
   const motion = useRef<Motion>({ anim: 'idle', speed: 0 })
   const velocity = useRef(new THREE.Vector2())
-  const jump = useRef({ y: 0, speed: 0 })
+  const jump = useRef({ y: 0, speed: 0, count: 0 })
+  const knock = useRef({ x: 0, z: 0, until: 0 })
   const lastAction = useRef(input.actionCount)
   const sendTimer = useRef(0)
   const onPad = useRef(false)
   const nearInfo = useRef<number | null>(null)
   const standingTile = useRef<number | null>(null)
   const lastPunch = useRef(input.punchCount)
+  const lastKick = useRef(input.kickCount)
   const stunUntil = useRef(0)
   const punchUntil = useRef(0)
+  const kickUntil = useRef(0)
 
   // 광장에서도 맞으면 잠깐 벌러덩 눕는다.
   useEffect(
@@ -248,10 +251,21 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
         const myId = connection.getState().myId
         if (punch.from === myId) audio.effect('hit')
         if (punch.to !== myId) return
-        stunUntil.current = performance.now() + PUNCH_STUN_SECONDS * 1000
+        const kicked = punch.kind === 'kick'
+        stunUntil.current = performance.now() + (kicked ? KICK_STUN_SECONDS : PUNCH_STUN_SECONDS) * 1000
         velocity.current.set(0, 0)
         audio.effect('hit')
-        connection.bubbles.set(myId, { text: `${nicknameOf(punch.from)}님에게 맞았다!`, until: performance.now() + 2000 })
+        const node = group.current
+        const from = connection.positions.get(punch.from)
+        if (kicked && node && from) {
+          // 찬 사람에게서 멀어지는 쪽으로 날아간다.
+          const dx = node.position.x - from.x
+          const dz = node.position.z - from.z
+          const length = Math.hypot(dx, dz) || 1
+          const speed = KICK_PUSH / KICK_PUSH_SECONDS
+          knock.current = { x: (dx / length) * speed, z: (dz / length) * speed, until: performance.now() + KICK_PUSH_SECONDS * 1000 }
+        }
+        connection.bubbles.set(myId, { text: kicked ? `${nicknameOf(punch.from)}님에게 차였다!` : `${nicknameOf(punch.from)}님에게 맞았다!`, until: performance.now() + 2000 })
       }),
     [],
   )
@@ -271,6 +285,10 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
     velocity.current.y += (-move.y * LOBBY_SPEED - velocity.current.y) * blend
     node.position.x += velocity.current.x * delta
     node.position.z += velocity.current.y * delta
+    if (performance.now() < knock.current.until) {
+      node.position.x += knock.current.x * delta
+      node.position.z += knock.current.z * delta
+    }
     for (const obstacle of LOBBY_OBSTACLES) pushOutOfCircle(node.position, obstacle)
     node.position.x = THREE.MathUtils.clamp(node.position.x, -LOBBY_HALF, LOBBY_HALF)
     node.position.z = THREE.MathUtils.clamp(node.position.z, -LOBBY_HALF, LOBBY_HALF)
@@ -278,6 +296,10 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
     if (input.punchCount !== lastPunch.current) {
       lastPunch.current = input.punchCount
       if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y)) punchUntil.current = performance.now() + 300
+    }
+    if (input.kickCount !== lastKick.current) {
+      lastKick.current = input.kickCount
+      if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y, true)) kickUntil.current = performance.now() + 400
     }
 
     const near = nearestInfo(node.position.x, node.position.z)
@@ -304,13 +326,22 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
         // 정원 타일 위의 스페이스는 나무 심기로 쓴다.
       } else if (jump.current.y === 0) {
         jump.current.speed = JUMP_SPEED
+        jump.current.count = 1
+        audio.effect('jump')
+      } else if (jump.current.count < MAX_JUMPS) {
+        // 2단 점프
+        jump.current.speed = DOUBLE_JUMP_SPEED
+        jump.current.count += 1
         audio.effect('jump')
       }
     }
     if (jump.current.y > 0 || jump.current.speed > 0) {
       jump.current.speed -= GRAVITY * delta
       jump.current.y = Math.max(0, jump.current.y + jump.current.speed * delta)
-      if (jump.current.y === 0) jump.current.speed = 0
+      if (jump.current.y === 0) {
+        jump.current.speed = 0
+        jump.current.count = 0
+      }
     }
     node.position.y = jump.current.y
 
@@ -322,7 +353,7 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
       node.rotation.y += turn * (1 - Math.exp(-delta * 14))
     }
     const now = performance.now()
-    const anim: Anim = now < stunUntil.current ? 'down' : now < cheerUntil.current ? 'cheer' : now < punchUntil.current ? 'punch' : jump.current.y > 0 ? 'jump' : speed > 0.5 ? 'walk' : 'idle'
+    const anim: Anim = now < stunUntil.current ? 'down' : now < cheerUntil.current ? 'cheer' : now < kickUntil.current ? 'kick' : now < punchUntil.current ? 'punch' : jump.current.y > 0 ? 'jump' : speed > 0.5 ? 'walk' : 'idle'
     self.x = node.position.x
     self.y = node.position.y
     self.z = node.position.z

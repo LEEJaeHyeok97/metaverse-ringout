@@ -7,6 +7,7 @@ const RIGHT = new Set(['KeyD', 'ArrowRight'])
 const ACTION = 'Space'
 const PUNCH = 'KeyF'
 const ITEM = 'KeyE'
+const KICK = 'KeyG'
 
 export const input = {
   pressed: new Set<string>(),
@@ -16,6 +17,8 @@ export const input = {
   actionHeld: false,
   /** F 키나 때리기 버튼을 누른 횟수 */
   punchCount: 0,
+  /** G 키나 발차기 버튼을 누른 횟수 */
+  kickCount: 0,
   /** E 키나 아이템 버튼을 누른 횟수 */
   itemCount: 0,
 }
@@ -31,6 +34,10 @@ export function pressAction() {
 
 export function pressPunch() {
   input.punchCount += 1
+}
+
+export function pressKick() {
+  input.kickCount += 1
 }
 
 export function pressItem() {
@@ -49,6 +56,10 @@ export function bindKeyboard() {
     }
     if (event.code === PUNCH) {
       if (!event.repeat) pressPunch()
+      return
+    }
+    if (event.code === KICK) {
+      if (!event.repeat) pressKick()
       return
     }
     if (event.code === ITEM) {

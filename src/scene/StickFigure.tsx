@@ -112,6 +112,9 @@ function poseFor(anim: Anim, t: number, speed: number, phase: number): Pose {
     }
     case 'punch':
       return { ...REST, lean: 0.25, hipL: 0.4, kneeL: 0.3, hipR: -0.3, shoulderR: 1.55, shoulderRz: 0, elbowR: 0, shoulderL: -0.5, elbowL: -1.2, shoulderLz: 0.4 }
+    case 'kick':
+      // 몸을 뒤로 젖히고 오른발을 앞으로 쭉 뻗는다.
+      return { ...REST, lean: -0.3, hipR: 1.7, kneeR: 0, hipL: -0.15, kneeL: 0.35, shoulderLz: 1.3, shoulderRz: -1.3, shoulderL: -0.3, shoulderR: -0.3 }
     case 'cheer': {
       const wave = Math.sin(t * 10) * 0.3
       return { ...REST, shoulderLz: 2.7 + wave, shoulderRz: -2.7 - wave, bob: Math.abs(Math.sin(t * 6)) * 0.2 }

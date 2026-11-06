@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { BRAND } from '../lib/brand'
-import { MAX_ROOM_PLAYERS } from '../game/course'
+import { mapById, MAX_ROOM_PLAYERS } from '../game/course'
 import { INTRO_BOARDS } from '../data/ringout'
 import { plantableCount, useGarden } from '../data/garden'
 import { connection, type ConnectionState } from '../net/connection'
@@ -26,10 +26,20 @@ function StatusPill({ state }: { state: ConnectionState }) {
   )
 }
 
-function Countdown({ departAt }: { departAt: number }) {
+function Countdown({ departAt, mapId }: { departAt: number; mapId: string | null }) {
   useTick(100)
   const left = Math.max(0, Math.ceil((departAt - performance.now()) / 1000))
-  return <p className="pop-in text-center text-2xl font-bold text-accent">{left}초 뒤 각자 집에서 눈을 떠요!</p>
+  const map = mapId ? mapById(mapId) : null
+  return (
+    <div className="pop-in flex flex-col items-center gap-1 text-center">
+      {map && (
+        <p className="sketch bg-[#FFF6C9] px-3 py-1 text-xl">
+          🎲 이번 맵: <b>{map.emoji} {map.name}</b>
+        </p>
+      )}
+      <p className="text-2xl font-bold text-accent">{left}초 뒤 각자 집에서 눈을 떠요!</p>
+    </div>
+  )
 }
 
 function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => void }) {
@@ -109,7 +119,7 @@ function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => 
             })}
           </ol>
           {state.departAt ? (
-            <Countdown departAt={state.departAt} />
+            <Countdown departAt={state.departAt} mapId={state.nextMap} />
           ) : (
             <>
               <p className="text-center text-lg text-pencil">{MAX_ROOM_PLAYERS}명이 모이면 자동으로 출발해요</p>
@@ -178,7 +188,7 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
         {showPanel && <RoomPanel state={state} onClose={onClosePanel} />}
       </div>
       <p className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/80 px-3 text-base whitespace-nowrap text-pencil max-sm:hidden">
-        WASD 이동 · 스페이스 점프/보기 · F 때리기 · 엔터 채팅
+        WASD 이동 · 스페이스 점프(2단)/보기 · F 때리기 · G 발차기 · 엔터 채팅
       </p>
       {plantable > 0 && nearInfo === null && !infoOpen && !showPanel && (
         <p className="sketch pop-in absolute bottom-40 left-1/2 -translate-x-1/2 bg-[#E3F5E9] px-4 py-1 text-xl whitespace-nowrap max-sm:bottom-52 max-sm:text-base">

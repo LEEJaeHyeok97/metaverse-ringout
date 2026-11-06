@@ -7,7 +7,7 @@ export const MAX_CHAT_LENGTH = 40
 
 /** 캐릭터 동작. 다른 화면에서 같은 자세로 그리기 위해 함께 보낸다. */
 // 번호로 주고받으므로 새 동작은 끝에만 붙인다.
-export const ANIMS = ['idle', 'walk', 'jump', 'sleep', 'down', 'cheer', 'stumble', 'ride', 'punch', 'trapped', 'ufo'] as const
+export const ANIMS = ['idle', 'walk', 'jump', 'sleep', 'down', 'cheer', 'stumble', 'ride', 'punch', 'trapped', 'ufo', 'kick'] as const
 export type Anim = (typeof ANIMS)[number]
 
 export type PlayerInfo = { id: number; nickname: string; color: string }
@@ -40,7 +40,8 @@ export type ClientMessage =
   | { t: 'start' }
   | { t: 'finish' }
   | { t: 'lobby' }
-  | { t: 'punch'; target: number }
+  /** kick이면 발차기: 더 멀리 닿고 맞은 사람이 뒤로 날아간다. */
+  | { t: 'punch'; target: number; kick?: boolean }
   | { t: 'ride'; bike: number }
   /** 남에게 쓰는 아이템. 물풍선과 귀가 포털은 target을, 우주선은 서버가 1등을 고른다. 바나나는 내 뒤에 놓는다. */
   | { t: 'item'; kind: 'balloon' | 'ufo' | 'banana' | 'warp'; target?: number }
@@ -52,13 +53,14 @@ export type ServerMessage =
   | { t: 'roster'; channel: 'lobby' | 'game'; players: PlayerInfo[] }
   | { t: 'snap'; p: SnapshotEntry[] }
   | { t: 'room'; room: RoomView | null }
-  | { t: 'countdown'; startIn: number }
-  | { t: 'start'; startIn: number; lanes: Record<number, number> }
+  /** map: 이번 판에 달릴 맵 id (course.ts의 MAPS) */
+  | { t: 'countdown'; startIn: number; map: string }
+  | { t: 'start'; startIn: number; lanes: Record<number, number>; map: string }
   | { t: 'finished'; id: number; ms: number; rank: number }
   | { t: 'results'; rows: ResultRow[] }
   | { t: 'chat'; id: number; nickname: string; text: string }
   | { t: 'error'; message: string }
-  | { t: 'punched'; from: number; to: number }
+  | { t: 'punched'; from: number; to: number; kick?: boolean }
   /** 자전거 번호 → 탄 사람. 한 번 탄 따릉이는 그 판에 다시 쓸 수 없다. */
   | { t: 'bikes'; taken: Record<number, number> }
   /** 누군가 아이템에 당했다. 당한 사람의 화면이 효과를 낸다. */

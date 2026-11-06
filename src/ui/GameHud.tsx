@@ -1,6 +1,6 @@
 import { TREE_ARRIVALS } from '../data/garden'
 import { GAME_TIPS } from '../data/ringout'
-import { ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
+import { activeMap, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
 import { gameSeconds, run, showGuide, toast } from '../game/run'
 import { BRAND } from '../lib/brand'
 import { connection, type ConnectionState, type GameInfo } from '../net/connection'
@@ -90,6 +90,10 @@ function CenterMessage({ t, myRank }: { t: number; myRank: number | null }) {
   if (t < 0) {
     return (
       <div className="flex flex-col items-center gap-1 text-center">
+        <p className="sketch bg-[#FFF6C9] px-4 py-1 text-2xl">
+          {activeMap.emoji} 오늘의 출근길: <b>{activeMap.name}</b>
+        </p>
+        <p className="text-lg text-pencil">{activeMap.intro}</p>
         <p className="text-2xl">모두 각자의 방에서 쿨쿨…</p>
         <p key={Math.ceil(-t)} className="pop-in text-7xl font-bold">{Math.ceil(-t)}</p>
         <p className="text-xl">알람이 울리면 스페이스를 연타해서 일어나요!</p>
@@ -191,7 +195,7 @@ function ItemStatus() {
       )}
       {run.nearBike !== null && <p className="sketch pop-in bg-[#E3F5E9] px-4 py-1 text-2xl">🚲 <b>스페이스</b>로 따릉이 타기</p>}
       {riding && <p className="sketch bg-[#E3F5E9] px-4 py-1 text-2xl font-bold">🚲 따릉이 {Math.ceil((run.rideUntil - now) / 1000)}초</p>}
-      <p className="rounded-full bg-white/80 px-3 text-base text-pencil max-sm:hidden">WASD 이동 · 스페이스 점프/타기 · E 아이템 · F 때리기</p>
+      <p className="rounded-full bg-white/80 px-3 text-base text-pencil max-sm:hidden">WASD 이동 · 스페이스 점프(2단)/타기 · E 아이템 · F 때리기 · G 발차기</p>
     </div>
   )
 }

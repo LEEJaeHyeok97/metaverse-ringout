@@ -12,7 +12,7 @@ export type Status = 'connecting' | 'online' | 'offline' | 'full'
 export type ChatLine = { key: number; id: number; nickname: string; text: string; at: number }
 
 /** 시작 시각은 받은 순간의 내 시계(performance.now) 기준으로 바꿔 둔다. */
-export type GameInfo = { startAt: number; lanes: Record<number, number>; finishes: { id: number; ms: number; rank: number }[] }
+export type GameInfo = { startAt: number; lanes: Record<number, number>; map: string; finishes: { id: number; ms: number; rank: number }[] }
 
 export type ConnectionState = {
   status: Status
@@ -22,6 +22,8 @@ export type ConnectionState = {
   room: RoomView | null
   /** 방이 모여 집으로 출발하기 직전의 카운트다운이 끝나는 시각 */
   departAt: number | null
+  /** 대기실 카운트다운 중에 미리 알려 준 이번 맵 */
+  nextMap: string | null
   match: GameInfo | null
   results: ResultRow[] | null
   chats: ChatLine[]
@@ -36,7 +38,7 @@ export type ConnectionState = {
 export type GardenTreeView = SharedTree & { plantedAt: number }
 
 /** 맞거나 아이템에 당한 일. 3D 화면이 효과와 기절을 그리는 데 쓴다. */
-export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'balloon' | 'ufo' | 'warp' }
+export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'balloon' | 'ufo' | 'warp' }
 
 /** 다른 사람의 위치. 스냅샷이 올 때마다 목표값만 바꾸고 화면은 매 프레임 따라간다. */
 export type RemoteState = { x: number; y: number; z: number; h: number; a: number; seenAt: number }
@@ -55,6 +57,7 @@ function createConnection() {
     game: [],
     room: null,
     departAt: null,
+    nextMap: null,
     match: null,
     results: null,
     chats: [],
@@ -114,11 +117,11 @@ function createConnection() {
         set({ room: message.room, departAt: message.room?.phase === 'countdown' ? state.departAt : null })
         return
       case 'countdown':
-        set({ departAt: performance.now() + message.startIn })
+        set({ departAt: performance.now() + message.startIn, nextMap: message.map })
         return
       case 'start':
         positions.clear()
-        set({ match: { startAt: performance.now() + message.startIn, lanes: message.lanes, finishes: [] }, results: null, departAt: null, bikes: {}, bananas: [] })
+        set({ match: { startAt: performance.now() + message.startIn, lanes: message.lanes, map: message.map, finishes: [] }, results: null, departAt: null, nextMap: null, bikes: {}, bananas: [] })
         return
       case 'finished':
         if (state.match) set({ match: { ...state.match, finishes: [...state.match.finishes, { id: message.id, ms: message.ms, rank: message.rank }] } })
@@ -136,7 +139,7 @@ function createConnection() {
         set({ error: message.message })
         return
       case 'punched':
-        emitHit({ from: message.from, to: message.to, at: performance.now(), kind: 'punch' })
+        emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kick ? 'kick' : 'punch' })
         return
       case 'trapped':
         emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kind })

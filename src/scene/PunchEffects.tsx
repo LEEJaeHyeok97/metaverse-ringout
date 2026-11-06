@@ -9,7 +9,7 @@ import type { HitEvent } from '../net/connection'
 
 const SHOW_MS = 700
 
-const WORDS: Record<HitEvent['kind'], string> = { punch: '퍽!', balloon: '풍덩!', ufo: '슈우웅~', warp: '휘리릭!' }
+const WORDS: Record<HitEvent['kind'], string> = { punch: '퍽!', kick: '뻥!', balloon: '풍덩!', ufo: '슈우웅~', warp: '휘리릭!' }
 
 function Pow({ to, at, kind, curved, onDone }: { to: number; at: number; kind: HitEvent['kind']; curved: boolean; onDone: () => void }) {
   const group = useRef<THREE.Group>(null)

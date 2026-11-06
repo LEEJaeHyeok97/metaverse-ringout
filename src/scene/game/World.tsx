@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
+  activeMap,
   bedSpot,
   deskSpot,
   DOOR_HALF,
@@ -141,7 +142,7 @@ function Prop({ kind, r }: { kind: (typeof PROPS)[number]['kind']; r: number }) 
           </mesh>
           <mesh position={[0, 1.1, 0]}>
             <sphereGeometry args={[r * 0.95, 12, 10]} />
-            <Ink color={COLORS.leaf} />
+            <Ink color={activeMap.theme.leaf} />
           </mesh>
         </group>
       )
@@ -149,7 +150,7 @@ function Prop({ kind, r }: { kind: (typeof PROPS)[number]['kind']; r: number }) 
       return (
         <mesh position={[0, r * 0.6, 0]} scale={[1, 0.7, 1]}>
           <sphereGeometry args={[r, 14, 10]} />
-          <Ink color={COLORS.leaf} />
+          <Ink color={activeMap.theme.leaf} />
         </mesh>
       )
     case 'cone':
@@ -218,8 +219,9 @@ function Stripe({ z, depth, color, y = 0.02 }: { z: number; depth: number; color
 const TREE_ZS = [-30, -60, -90, -120, -150, -180, -215, -245, -275, -305, -335]
 
 export function World({ owners }: { owners: Map<number, { nickname: string; color: string }> }) {
-  const ground = useGridTexture(60, 60)
-  const road = useGridTexture(1, 1, COLORS.street)
+  const theme = activeMap.theme
+  const ground = useGridTexture(60, 60, theme.paper)
+  const road = useGridTexture(1, 1, theme.street)
   return (
     <>
       {/* 도로 밖 종이 바닥 */}
@@ -245,7 +247,7 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
 
       {ROAD_ZS.map((z) => (
         <group key={z}>
-          <Stripe z={z} depth={3.4} color={COLORS.road} />
+          <Stripe z={z} depth={3.4} color={theme.road} />
           <OnCourse z={z} y={0.03}>
             {Array.from({ length: 6 }, (_, i) => (
               <mesh key={i} position={[-STREET_HALF_W + 2.5 + i * 5, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -264,7 +266,7 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
         <OnCourse key={`${puddle.x},${puddle.z}`} x={puddle.x} z={puddle.z} y={0.03}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} scale={[1, 0.8, 1]}>
             <circleGeometry args={[puddle.r, 32]} />
-            <meshBasicMaterial color={COLORS.water} />
+            <meshBasicMaterial color={theme.water} />
           </mesh>
           <mesh position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[1, 0.8, 1]}>
             <ringGeometry args={[puddle.r - 0.06, puddle.r + 0.04, 32]} />
@@ -298,10 +300,10 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
 
       {TREE_ZS.flatMap((z, index) => [
         <OnCourse key={`l${z}`} x={-STREET_HALF_W - 4 - (index % 3)} z={z}>
-          <Tree position={[0, 0, 0]} />
+          <Tree position={[0, 0, 0]} color={theme.leaf} />
         </OnCourse>,
         <OnCourse key={`r${z}`} x={STREET_HALF_W + 4 + (index % 2) * 2} z={z - 12}>
-          <Tree position={[0, 0, 0]} scale={1.15} />
+          <Tree position={[0, 0, 0]} scale={1.15} color={index % 2 && theme.weather === 'leaves' ? '#E76F51' : theme.leaf} />
         </OnCourse>,
       ])}
     </>
