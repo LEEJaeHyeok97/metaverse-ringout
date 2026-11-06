@@ -12,7 +12,15 @@ git -C .. pull --ff-only
 docker compose up -d --build
 docker image prune -f >/dev/null
 
-echo "▶ 상태 확인"
-sleep 3
+echo "▶ 서버가 뜨기를 기다리는 중 (micro는 몇 초 걸린다)"
+for _ in $(seq 1 30); do
+  if docker compose exec -T app node -e "fetch('http://localhost:8787/health').then(r=>r.text()).then(t=>{console.log('✅ health:',t)}).catch(()=>process.exit(1))" 2>/dev/null; then
+    docker compose ps
+    exit 0
+  fi
+  sleep 2
+done
+echo "❌ 60초 안에 서버가 뜨지 않았어요. 로그를 확인해 주세요:"
 docker compose ps
-docker compose exec -T app node -e "fetch('http://localhost:8787/health').then(r=>r.text()).then(t=>console.log('health:',t))"
+docker compose logs app --tail 30
+exit 1
