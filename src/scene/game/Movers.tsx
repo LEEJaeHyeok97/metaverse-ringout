@@ -126,6 +126,8 @@ const pigeonHead = new THREE.SphereGeometry(0.18, 10, 8)
 const beak = new THREE.ConeGeometry(0.06, 0.16, 6)
 
 function Pigeons() {
+  // 비둘기 광장은 판교 출근길에만 있다.
+  const present = useMemo(() => pigeonsAt(0).length > 0, [])
   const nodes = useRef<(THREE.Group | null)[]>([])
   useFrame(() => {
     pigeonsAt(gameSeconds()).forEach((pigeon, index) => {
@@ -134,6 +136,7 @@ function Pigeons() {
       placeOnCourse(node, pigeon.x, pigeon.hop * 0.15, pigeon.z, pigeon.heading)
     })
   })
+  if (!present) return null
   return (
     <>
       {Array.from({ length: PIGEON_COUNT }, (_, index) => (

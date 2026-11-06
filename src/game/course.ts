@@ -59,9 +59,11 @@ export function halfWidthAt(z: number) {
  * 골목(출발)과 캠퍼스(도착) 사이는 장애물 구간 여섯 개로 이루어진다. 맵마다 구간 순서, 길이 휘는 모양, 날씨가 다르다.
  * 서버가 게임을 시작할 때 맵을 하나 골라 모두에게 알려 주고, 화면은 applyMap()으로 그 맵을 깐다.
  */
-export type SectionKind = 'road' | 'pigeons' | 'hurdles' | 'subway' | 'light' | 'scooter'
+export type SectionKind = 'road' | 'pigeons' | 'hurdles' | 'subway' | 'light' | 'scooter' | SpecialKind
+/** 맵마다 하나씩 있는 그 맵만의 구간. 판교는 비둘기 광장이 그 자리다. */
+export type SpecialKind = 'storm' | 'acorns' | 'ice'
 
-const SECTION_LENGTH: Record<SectionKind, number> = { road: 34, pigeons: 46, hurdles: 40, subway: 30, light: 40, scooter: 72 }
+const SECTION_LENGTH: Record<SectionKind, number> = { road: 34, pigeons: 46, hurdles: 40, subway: 30, light: 40, scooter: 72, storm: 46, acorns: 46, ice: 46 }
 const SECTION_NAME: Record<SectionKind, string> = {
   road: '아침 찻길',
   pigeons: '비둘기 광장',
@@ -69,6 +71,9 @@ const SECTION_NAME: Record<SectionKind, string> = {
   subway: '지하철 스크린도어',
   light: '무궁화 신호등',
   scooter: '킥보드 언덕',
+  storm: '천둥 번개 사거리',
+  acorns: '데굴데굴 도토리 언덕',
+  ice: '꽁꽁 언 호수공원',
 }
 /** 골목이 끝나고 장애물 구간이 시작되는 거리 */
 const SECTIONS_FROM = 74
@@ -85,6 +90,10 @@ export type MapTheme = {
   leaf: string
   water: string
   weather: Weather
+  /** 웅덩이가 얼어 있다. 느려지는 대신 미끄러진다. */
+  icy?: boolean
+  /** 허들 모양: 공사장 펜스, 쓰러진 통나무, 눈더미 */
+  hurdle?: 'fence' | 'log' | 'snow'
 }
 
 export type CourseMap = {
@@ -95,6 +104,8 @@ export type CourseMap = {
   intro: string
   alley: string
   sections: SectionKind[]
+  /** 이 맵에서만 다르게 부르는 구간 이름 */
+  names?: Partial<Record<SectionKind, string>>
   /** 구간마다 휘는 정도(1/반지름). 양수면 오른쪽으로 꺾인다. 캠퍼스 앞(334~)은 곧게 둔다. */
   bends: Bend[]
   theme: MapTheme
@@ -124,9 +135,10 @@ export const MAPS: CourseMap[] = [
     id: 'rainy',
     name: '비 오는 월요일',
     emoji: '☔',
-    intro: '지하철부터 타고, 웅덩이는 피해서',
+    intro: '⚡ 번개 그림자를 피하고, 💨 돌풍에 밀리지 마세요',
     alley: '빗물 고인 골목',
-    sections: ['subway', 'road', 'scooter', 'pigeons', 'light', 'hurdles'],
+    sections: ['subway', 'road', 'scooter', 'storm', 'light', 'hurdles'],
+    names: { road: '물 튀기는 찻길' },
     bends: [
       { from: 50, to: 110, curvature: 1 / 70 },
       { from: 130, to: 200, curvature: -1 / 60 },
@@ -139,9 +151,10 @@ export const MAPS: CourseMap[] = [
     id: 'autumn',
     name: '단풍 공원길',
     emoji: '🍁',
-    intro: '지그재그 공원길, 허들부터 넘어요',
+    intro: '🌰 굴러오는 도토리는 2단 점프로, 🍂 낙엽 더미는 폴짝!',
     alley: '낙엽 쌓인 골목',
-    sections: ['hurdles', 'pigeons', 'light', 'road', 'subway', 'scooter'],
+    sections: ['hurdles', 'acorns', 'light', 'road', 'subway', 'scooter'],
+    names: { hurdles: '쓰러진 통나무', scooter: '은행나무 킥보드길' },
     bends: [
       { from: 42, to: 70, curvature: 1 / 40 },
       { from: 76, to: 104, curvature: -1 / 40 },
@@ -152,15 +165,16 @@ export const MAPS: CourseMap[] = [
       { from: 290, to: 320, curvature: 1 / 60 },
       { from: 320, to: 332, curvature: -1 / 30 },
     ],
-    theme: { paper: '#FBF1E1', street: '#F3E6D1', road: '#DCC9AE', leaf: '#F4A261', water: '#BFE3F5', weather: 'leaves' },
+    theme: { paper: '#FBF1E1', street: '#F3E6D1', road: '#DCC9AE', leaf: '#F4A261', water: '#BFE3F5', weather: 'leaves', hurdle: 'log' },
   },
   {
     id: 'snow',
     name: '첫눈 오는 날',
     emoji: '❄️',
-    intro: '신호등부터 시작! 빙판은 미끄러워요',
+    intro: '🧊 얼음 위는 쭈욱 미끄러지고, 🚜 제설차가 밀어내요',
     alley: '눈 쌓인 골목',
-    sections: ['light', 'scooter', 'road', 'hurdles', 'pigeons', 'subway'],
+    sections: ['light', 'scooter', 'road', 'hurdles', 'ice', 'subway'],
+    names: { hurdles: '눈더미 허들', road: '제설 안 된 찻길' },
     bends: [
       { from: 45, to: 95, curvature: -1 / 60 },
       { from: 110, to: 170, curvature: 1 / 55 },
@@ -168,7 +182,7 @@ export const MAPS: CourseMap[] = [
       { from: 230, to: 290, curvature: -1 / 50 },
       { from: 300, to: 332, curvature: 1 / 64 },
     ],
-    theme: { paper: '#F2F6FA', street: '#FFFFFF', road: '#D8E0E8', leaf: '#E4EEF6', water: '#CDEBFA', weather: 'snow' },
+    theme: { paper: '#F2F6FA', street: '#FFFFFF', road: '#D8E0E8', leaf: '#E4EEF6', water: '#CDEBFA', weather: 'snow', icy: true, hurdle: 'snow' },
   },
 ]
 
@@ -404,6 +418,7 @@ export const PIGEON_COUNT = 18
 export const PIGEON_RADIUS = 0.55
 
 export function pigeonsAt(seconds: number) {
+  if (!HAS_PIGEONS) return []
   const t = Math.max(0, seconds)
   return Array.from({ length: PIGEON_COUNT }, (_, i) => {
     const cx = -10 + ((i * 37) % 21)
@@ -532,6 +547,11 @@ export type CourseLayout = {
   bikes: { id: number; x: number; z: number }[]
   coffees: { id: number; x: number; z: number }[]
   itemRows: number[]
+  /** 이 맵만의 구간. 판교는 없다(비둘기 광장이 그 자리). */
+  special: { kind: SpecialKind; from: number; to: number } | null
+  hasPigeons: boolean
+  /** 밟으면 높이 튀어 오르는 낙엽 더미 */
+  leafPiles: Circle[]
 }
 
 /** 출발 골목. 모든 맵에 같다. */
@@ -578,6 +598,7 @@ const SECTION_CONTENT: Record<
     bikes?: Spot[]
     coffees?: Spot[]
     itemRows?: number[]
+    leafPiles?: (Spot & { r: number })[]
   }
 > = {
   road: {
@@ -617,6 +638,46 @@ const SECTION_CONTENT: Record<
     ],
   },
   light: { itemRows: [12] },
+  storm: {
+    bikes: [
+      { x: -8, d: 4 },
+      { x: 8, d: 5 },
+    ],
+    coffees: [
+      { x: -2, d: 22 },
+      { x: 11, d: 38 },
+    ],
+    itemRows: [44],
+  },
+  acorns: {
+    leafPiles: [
+      { x: -6, d: 9, r: 1.7 },
+      { x: 7, d: 17, r: 1.7 },
+      { x: -1, d: 27, r: 1.7 },
+      { x: 9, d: 35, r: 1.7 },
+      { x: -9, d: 39, r: 1.7 },
+    ],
+    bikes: [
+      { x: -8, d: 4 },
+      { x: 8, d: 5 },
+    ],
+    coffees: [
+      { x: -2, d: 22 },
+      { x: 11, d: 38 },
+    ],
+    itemRows: [44],
+  },
+  ice: {
+    bikes: [
+      { x: -8, d: 4 },
+      { x: 8, d: 5 },
+    ],
+    coffees: [
+      { x: -2, d: 22 },
+      { x: 11, d: 38 },
+    ],
+    itemRows: [44],
+  },
   scooter: {
     lanes: [
       { kind: 'scooter', d: 12, speed: 18, offsets: [0, 24], hx: 0.9, hz: 0.5 },
@@ -652,6 +713,9 @@ export function buildLayout(map: CourseMap): CourseLayout {
     bikes: [],
     coffees: [],
     itemRows: [...ALLEY.itemRows],
+    special: null,
+    hasPigeons: false,
+    leafPiles: [],
   }
   const bikes = [...ALLEY.bikes]
   const coffees = [...ALLEY.coffees]
@@ -659,7 +723,7 @@ export function buildLayout(map: CourseMap): CourseLayout {
   for (const kind of map.sections) {
     const z = (d: number) => -(start + d)
     const content = SECTION_CONTENT[kind]
-    layout.zones.push({ name: SECTION_NAME[kind], from: z(0), to: z(SECTION_LENGTH[kind] - 2) })
+    layout.zones.push({ name: map.names?.[kind] ?? SECTION_NAME[kind], from: z(0), to: z(SECTION_LENGTH[kind] - 2) })
     for (const { x, d, r } of content.puddles ?? []) layout.puddles.push({ x, z: z(d), r })
     for (const { x, d, r, kind: prop } of content.props ?? []) layout.props.push({ x, z: z(d), r, kind: prop })
     for (const d of content.hurdles ?? []) layout.hurdleZs.push(z(d))
@@ -667,7 +731,12 @@ export function buildLayout(map: CourseMap): CourseLayout {
     for (const { x, d } of content.bikes ?? []) bikes.push({ x, z: z(d) })
     for (const { x, d } of content.coffees ?? []) coffees.push({ x, z: z(d) })
     for (const d of content.itemRows ?? []) layout.itemRows.push(z(d))
-    if (kind === 'pigeons') layout.pigeonFrom = z(4)
+    for (const { x, d, r } of content.leafPiles ?? []) layout.leafPiles.push({ x, z: z(d), r })
+    if (kind === 'pigeons') {
+      layout.pigeonFrom = z(4)
+      layout.hasPigeons = true
+    }
+    if (kind === 'storm' || kind === 'acorns' || kind === 'ice') layout.special = { kind, from: z(0), to: z(SECTION_LENGTH[kind]) }
     if (kind === 'subway') layout.subwayZ = z(12)
     if (kind === 'light') layout.lightZone = { from: z(4), to: z(36) }
     start += SECTION_LENGTH[kind]
@@ -696,6 +765,10 @@ export let activeMap: CourseMap = MAPS[0]
 let centerline = buildCenterline(activeMap.bends)
 let VEHICLE_LANES: VehicleLane[] = []
 let PIGEON_FROM = 0
+let HAS_PIGEONS = true
+/** 지금 맵만의 구간. 없으면 null */
+export let SPECIAL: CourseLayout['special'] = null
+export let LEAF_PILES: Circle[] = []
 export let ZONES: Zone[] = []
 export let PUDDLES: Circle[] = []
 export let PROPS: Prop[] = []
@@ -715,6 +788,9 @@ export function applyMap(mapId: string | undefined) {
   centerline = buildCenterline(activeMap.bends)
   VEHICLE_LANES = layout.vehicleLanes
   PIGEON_FROM = layout.pigeonFrom
+  HAS_PIGEONS = layout.hasPigeons
+  SPECIAL = layout.special
+  LEAF_PILES = layout.leafPiles
   ZONES = layout.zones
   PUDDLES = layout.puddles
   PROPS = layout.props
@@ -729,3 +805,106 @@ export function applyMap(mapId: string | undefined) {
 }
 
 applyMap(DEFAULT_MAP_ID)
+
+// ---- 맵만의 구간 ----
+/** 지금 이 거리(z)가 맵만의 구간 안이면 그 종류 */
+export function specialAt(z: number): SpecialKind | null {
+  return SPECIAL && z <= SPECIAL.from && z >= SPECIAL.to ? SPECIAL.kind : null
+}
+
+/** 0~1 사이의 고정된 난수. 같은 k면 모든 화면에서 같은 값이다. */
+function noise(k: number) {
+  const value = Math.sin(k * 12.9898 + 78.233) * 43758.5453
+  return value - Math.floor(value)
+}
+
+// 천둥 번개 사거리: 돌풍이 옆으로 밀고, 번개는 그림자로 미리 알린 자리에 떨어진다.
+const GUST_CYCLE = 6
+const GUST_FROM = 2.3
+const GUST_TO = 4.8
+export const GUST_WARN = 1.2
+export const GUST_SPEED = 6
+
+/** 돌풍. dir은 미는 쪽(+1 오른쪽), strength는 0~1, warn이면 곧 분다. */
+export function gustAt(seconds: number) {
+  const cycle = Math.floor(seconds / GUST_CYCLE)
+  const local = seconds - cycle * GUST_CYCLE
+  const dir: 1 | -1 = noise(cycle) < 0.5 ? 1 : -1
+  const blowing = local >= GUST_FROM && local < GUST_TO
+  const strength = blowing ? Math.sin(((local - GUST_FROM) / (GUST_TO - GUST_FROM)) * Math.PI) : 0
+  return { dir, strength, warn: !blowing && local >= GUST_FROM - GUST_WARN && local < GUST_FROM }
+}
+
+const LIGHTNING_EVERY = 0.55
+export const LIGHTNING_WARN = 1.3
+export const LIGHTNING_FLASH = 0.3
+export const LIGHTNING_RADIUS = 2.2
+/** 동시에 보일 수 있는 번개 수(화면이 미리 만들어 둘 개수) */
+export const LIGHTNING_MAX = Math.ceil((LIGHTNING_WARN + LIGHTNING_FLASH) / LIGHTNING_EVERY) + 1
+
+export type Strike = { id: number; x: number; z: number; /** 0~1: 그림자가 커지는 중, 1 이상: 번쩍 */ progress: number; striking: boolean }
+
+export function lightningAt(seconds: number): Strike[] {
+  if (SPECIAL?.kind !== 'storm') return []
+  const { from, to } = SPECIAL
+  const result: Strike[] = []
+  const first = Math.floor((seconds - LIGHTNING_FLASH) / LIGHTNING_EVERY)
+  const last = Math.floor((seconds + LIGHTNING_WARN) / LIGHTNING_EVERY)
+  for (let k = Math.max(first, 1); k <= last; k++) {
+    const at = k * LIGHTNING_EVERY
+    const age = seconds - (at - LIGHTNING_WARN)
+    if (age < 0 || age >= LIGHTNING_WARN + LIGHTNING_FLASH) continue
+    result.push({
+      id: k,
+      x: (noise(k) * 2 - 1) * (STREET_HALF_W - 3),
+      z: from - 3 - noise(k + 0.37) * (from - to - 6),
+      progress: age / LIGHTNING_WARN,
+      striking: seconds >= at,
+    })
+  }
+  return result
+}
+
+// 데굴데굴 도토리 언덕: 커다란 도토리가 출발 쪽으로 굴러 내려온다. 점프로 넘는다.
+const ACORN_LANES = [-10, -5, 0, 5, 10]
+const ACORN_SPEED = 9
+const ACORN_PERIOD = 3.6
+export const ACORN_RADIUS = 0.9
+/** 이보다 높이 떠 있으면 도토리를 넘는다. 한 번 뛰면 아슬아슬, 2단 점프면 넉넉하다. */
+export const ACORN_CLEAR_HEIGHT = 1
+/** 동시에 보일 수 있는 도토리 수 */
+export const ACORN_MAX = ACORN_LANES.length * 2
+export const LEAF_BOUNCE_SPEED = 11
+
+export function acornsAt(seconds: number) {
+  if (SPECIAL?.kind !== 'acorns') return []
+  const { from, to } = SPECIAL
+  const travel = (from - to) / ACORN_SPEED
+  const result: { x: number; z: number; roll: number }[] = []
+  ACORN_LANES.forEach((x, lane) => {
+    const offset = noise(lane + 3) * ACORN_PERIOD
+    const latest = Math.floor((seconds - offset) / ACORN_PERIOD)
+    for (let n = latest; n > latest - 2; n--) {
+      const age = seconds - (n * ACORN_PERIOD + offset)
+      if (age < 0 || age >= travel) continue
+      const distance = age * ACORN_SPEED
+      result.push({ x, z: to + distance, roll: distance / ACORN_RADIUS })
+    }
+  })
+  return result
+}
+
+// 꽁꽁 언 호수공원: 얼음 위에서는 미끄러지고, 제설차가 길을 가로지르며 밀어낸다.
+/** 얼음 위에서 움직임이 따라붙는 빠르기. 땅은 12다. */
+export const ICE_GRIP = 1.6
+const PLOW_LANES = [
+  { d: 14, speed: 5, offset: 0 },
+  { d: 32, speed: -4.2, offset: 20 },
+]
+export const PLOW = { hx: 3.2, hz: 1.3 }
+
+export function plowsAt(seconds: number): (Box & { dir: 1 | -1 })[] {
+  if (SPECIAL?.kind !== 'ice') return []
+  const from = SPECIAL.from
+  return PLOW_LANES.map((lane) => ({ x: wrap(lane.offset + lane.speed * Math.max(0, seconds)), z: from - lane.d, hx: PLOW.hx, hz: PLOW.hz, dir: lane.speed > 0 ? 1 : -1 }))
+}

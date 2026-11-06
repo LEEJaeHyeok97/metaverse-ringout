@@ -92,7 +92,7 @@ export function toast(text: string, tone: Toast['tone'] = 'bad') {
 
 // 개발 서버에서만 브라우저 자동 점검이 진행 상태를 읽을 수 있게 열어 둔다.
 // 브라우저 자동 점검이 지금 맵의 장애물 자리를 읽을 수 있게 한다.
-if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds, course: () => ({ map: course.activeMap.id, light: course.LIGHT_ZONE, hurdles: course.HURDLE_ZS }) }
+if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds, course: () => ({ map: course.activeMap.id, light: course.LIGHT_ZONE, hurdles: course.HURDLE_ZS, special: course.SPECIAL }) }
 
 /** 링아웃 기능을 설명하는 가이드 카드를 띄운다. 한 판에 같은 가이드는 한 번만 보여 준다. */
 export function showGuide(id: GuideId) {

@@ -1,6 +1,6 @@
 import { TREE_ARRIVALS } from '../data/garden'
 import { GAME_TIPS } from '../data/ringout'
-import { activeMap, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
+import { activeMap, gustAt, specialAt, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
 import { gameSeconds, run, showGuide, toast } from '../game/run'
 import { BRAND } from '../lib/brand'
 import { connection, type ConnectionState, type GameInfo } from '../net/connection'
@@ -58,6 +58,22 @@ function LightSign({ t }: { t: number }) {
   const light = lightAt(t)
   const text = { green: '🟢 초록불! 달려요', yellow: '🟡 곧 빨간불, 멈출 준비', red: '🔴 빨간불! 움직이면 처음으로' }[light]
   return <p className={`sketch px-3 text-2xl font-bold ${light === 'red' ? 'bg-accent-soft' : light === 'yellow' ? 'bg-[#FFF6C9]' : 'bg-green-100'}`}>{text}</p>
+}
+
+/** 맵만의 구간에서는 지금 조심할 것을 크게 알려 준다. */
+function SpecialSign({ t }: { t: number }) {
+  if (run.phase !== 'running') return null
+  const special = specialAt(run.z)
+  if (special === 'storm') {
+    const gust = gustAt(t)
+    const arrow = gust.dir > 0 ? '→' : '←'
+    if (gust.strength > 0.05) return <p className="sketch bg-[#DCE6F2] px-3 text-2xl font-bold">💨 돌풍! {arrow} 쪽으로 밀려요</p>
+    if (gust.warn) return <p className="sketch bg-[#FFF6C9] px-3 text-2xl font-bold">💨 곧 {arrow} 돌풍!</p>
+    return <p className="sketch bg-white px-3 text-xl">⚡ 그림자를 피하세요</p>
+  }
+  if (special === 'acorns') return <p className="sketch bg-[#FBE3C8] px-3 text-xl">🌰 도토리는 점프로! 🍂 낙엽은 폴짝</p>
+  if (special === 'ice') return <p className="sketch bg-[#DFF1FF] px-3 text-xl">🧊 미끄러워요 · 🚜 제설차 조심</p>
+  return null
 }
 
 function Progress({ entrants, myId }: { entrants: PlayerInfo[]; myId: number | null }) {
@@ -301,6 +317,7 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
           <p className="text-lg">{late ? '지각이에요! 그래도 끝까지' : '09:00까지 도착하면 정시 출근'}</p>
           {zone && <p className="sketch bg-[#FFF6C9] px-3 text-xl">{zone.name}</p>}
           <LightSign t={t} />
+          <SpecialSign t={t} />
         </div>
         <div className="flex flex-col items-end gap-2">
           <MuteButton />

@@ -35,6 +35,7 @@ import { Ink } from '../ink'
 import { Label } from '../Label'
 import { Campus } from './Campus'
 import { OnCourse, RoadSurface } from './onCourse'
+import { Specials } from './Specials'
 
 const WALL_HEIGHT = 2
 const WALL = 0.25
@@ -163,7 +164,37 @@ function Prop({ kind, r }: { kind: (typeof PROPS)[number]['kind']; r: number }) 
   }
 }
 
+/** 허들. 맵에 따라 공사장 펜스, 쓰러진 통나무, 눈더미로 그린다. 판정은 같다. */
 function Hurdle() {
+  const style = activeMap.theme.hurdle ?? 'fence'
+  if (style === 'log') {
+    return (
+      <group>
+        <mesh position={[0, HURDLE_HEIGHT / 2, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[HURDLE_HEIGHT / 2, HURDLE_HEIGHT / 2, STREET_HALF_W * 2, 14]} />
+          <Ink color="#A8754B" />
+        </mesh>
+        {[-1, 1].map((side) => (
+          <mesh key={side} position={[side * STREET_HALF_W, HURDLE_HEIGHT / 2, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[HURDLE_HEIGHT / 2 - 0.05, HURDLE_HEIGHT / 2 - 0.05, 0.05, 14]} />
+            <meshBasicMaterial color="#E9C99B" />
+          </mesh>
+        ))}
+        <mesh position={[3, HURDLE_HEIGHT + 0.15, 0]}>
+          <sphereGeometry args={[0.3, 10, 8]} />
+          <Ink color="#F4A261" />
+        </mesh>
+      </group>
+    )
+  }
+  if (style === 'snow') {
+    return (
+      <mesh position={[0, 0, 0]} scale={[STREET_HALF_W, HURDLE_HEIGHT, 0.9]}>
+        <sphereGeometry args={[1, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <Ink color="#FFFFFF" />
+      </mesh>
+    )
+  }
   const legs = []
   for (let x = -STREET_HALF_W + 1; x <= STREET_HALF_W - 1; x += 5) legs.push(x)
   return (
@@ -284,6 +315,7 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
           <Hurdle />
         </OnCourse>
       ))}
+      <Specials />
       <OnCourse z={SUBWAY_Z}>
         <SubwayWall />
       </OnCourse>

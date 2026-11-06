@@ -32,6 +32,19 @@ import {
   ITEM_RESPAWN_MS,
   ITEM_ROWS,
   JUMP_SPEED,
+  activeMap,
+  specialAt,
+  gustAt,
+  GUST_SPEED,
+  lightningAt,
+  LIGHTNING_RADIUS,
+  acornsAt,
+  ACORN_RADIUS,
+  ACORN_CLEAR_HEIGHT,
+  LEAF_PILES,
+  LEAF_BOUNCE_SPEED,
+  ICE_GRIP,
+  plowsAt,
   DOUBLE_JUMP_SPEED,
   MAX_JUMPS,
   KICK_PUSH,
@@ -97,6 +110,8 @@ const HITS = {
   hurdle: { anim: 'down', seconds: 1.2 },
   light: { anim: 'stumble', seconds: 1.2 },
   banana: { anim: 'stumble', seconds: BANANA_SLIP_SECONDS },
+  lightning: { anim: 'down', seconds: 1.3 },
+  acorn: { anim: 'stumble', seconds: 1 },
 } satisfies Record<string, Stun>
 
 const overviewCamera = new THREE.Vector3(0, 26, 22)
@@ -146,6 +161,9 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
   const immuneUntil = useRef(0)
   const inPuddle = useRef(false)
   const warnedLate = useRef(false)
+  /** 맵만의 구간에 처음 들어갈 때 한 번만 알려 준다. */
+  const specialTold = useRef(false)
+  const plowTold = useRef(false)
   const sendTimer = useRef(0)
   const slipped = useRef(new Set<number>())
   const [reward, setReward] = useState<ReturnType<typeof growth> | null>(null)
@@ -381,14 +399,30 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       // 물풍선에 갇혔으면 스페이스를 연타해 빨리 빠져나온다.
       if (pressed && stunned && stunAnim.current === 'trapped') run.stunUntil -= BALLOON_ESCAPE_MS
 
+      const special = specialAt(p.z)
+      if (special && !specialTold.current) {
+        specialTold.current = true
+        toast(
+          {
+            storm: '⚡ 바닥의 그림자에 번개가 떨어져요! 💨 돌풍이 불면 옆으로 밀려요',
+            acorns: '🌰 도토리가 굴러와요! 점프(2단 점프)로 넘고, 🍂 낙엽 더미를 밟으면 폴짝!',
+            ice: '🧊 얼음판이에요! 쭈욱 미끄러져요. 🚜 제설차에 밀리지 않게 조심',
+          }[special],
+          'info',
+        )
+      }
+      const icy = activeMap.theme.icy === true
       const puddle = PUDDLES.some((circle) => Math.hypot(p.x - circle.x, p.z - circle.z) < circle.r * 0.9)
       if (puddle && !inPuddle.current) audio.effect('splash')
       inPuddle.current = puddle
       // 따릉이, 부스터, 알람 부스트는 겹치지 않고 가장 빠른 쪽을 쓴다. 따릉이는 웅덩이에서도 느려지지 않는다.
       const factor = Math.max(riding ? RIDE_FACTOR : 1, now < run.boostUntil ? BOOST_FACTOR : 1, now < run.boosterUntil ? BOOSTER_FACTOR : 1)
-      const speed = stunned || overlay.open ? 0 : WALK_SPEED * factor * (puddle && !riding && jump.current.y === 0 ? PUDDLE_FACTOR : 1)
+      // 얼어붙은 웅덩이와 호수는 느려지는 대신 미끄러진다.
+      const slowed = puddle && !icy && !riding && jump.current.y === 0
+      const slippery = (special === 'ice' || (icy && puddle)) && jump.current.y === 0
+      const speed = stunned || overlay.open ? 0 : WALK_SPEED * factor * (slowed ? PUDDLE_FACTOR : 1)
       const move = moveVector()
-      const blend = 1 - Math.exp(-delta * 12)
+      const blend = 1 - Math.exp(-delta * (slippery ? ICE_GRIP : 12))
       velocity.current.x += (move.x * speed - velocity.current.x) * blend
       velocity.current.y += (-move.y * speed - velocity.current.y) * blend
       p.x += velocity.current.x * delta
@@ -396,6 +430,17 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       if (now < knock.current.until) {
         p.x += knock.current.x * delta
         p.z += knock.current.z * delta
+      }
+      // 돌풍은 기절해 있어도, 따릉이를 타고 있어도 옆으로 민다.
+      if (special === 'storm') {
+        const gust = gustAt(t)
+        p.x += gust.dir * gust.strength * GUST_SPEED * delta
+      }
+      // 낙엽 더미를 밟으면 높이 튀어 오른다. 공중에서 한 번 더 뛸 수 있다.
+      if (special === 'acorns' && jump.current.y === 0 && !stunned && LEAF_PILES.some((pile) => Math.hypot(pile.x - p.x, pile.z - p.z) < pile.r)) {
+        jump.current.speed = LEAF_BOUNCE_SPEED
+        jump.current.count = 1
+        audio.effect('pop')
       }
 
       if (pressed && !stunned && !riding) {
@@ -431,6 +476,15 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       confine(p, prev, !run.appSet)
       for (const prop of PROPS) pushOutOfCircle(p, prop)
       for (const wall of subwayWalls(t)) pushOutOfBox(p, wall)
+      // 제설차는 벽처럼 밀고 지나간다.
+      for (const plow of plowsAt(t)) {
+        if (!circleHitsBox(p.x, p.z, BODY_RADIUS, plow)) continue
+        pushOutOfBox(p, plow)
+        if (!plowTold.current) {
+          plowTold.current = true
+          toast('🚜 제설차에 밀려요! 앞이나 뒤로 피하세요', 'info')
+        }
+      }
 
       const hit = (kind: keyof typeof HITS, message: string, effect: Parameters<typeof audio.effect>[0], resetZ?: number) => {
         const stun = HITS[kind]
@@ -449,6 +503,8 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         const hurdle = HURDLE_ZS.find((z) => Math.abs(p.z - z) < HURDLE_HALF_DEPTH + BODY_RADIUS && p.y < HURDLE_HEIGHT)
         const moving = velocity.current.length() > 1
         const caught = p.z <= LIGHT_ZONE.from && p.z >= LIGHT_ZONE.to && moving && lightAt(t) === 'red' && lightAt(t - LIGHT_GRACE) === 'red'
+        const strike = special === 'storm' ? lightningAt(t).find((bolt) => bolt.striking && Math.hypot(bolt.x - p.x, bolt.z - p.z) < LIGHTNING_RADIUS) : undefined
+        const acorn = special === 'acorns' && p.y < ACORN_CLEAR_HEIGHT ? acornsAt(t).find((item) => Math.abs(item.x - p.x) < ACORN_RADIUS + BODY_RADIUS && Math.abs(item.z - p.z) < ACORN_RADIUS + BODY_RADIUS) : undefined
         const banana = connection.getState().bananas.find((item) => !slipped.current.has(item.id) && Math.hypot(item.x - p.x, item.z - p.z) < BANANA_RADIUS + BODY_RADIUS && p.y < 0.3)
         if (car) {
           hit('car', car.kind === 'scooter' ? '킥보드랑 쾅! 잠깐 기절' : '빵빵! 차에 부딪혀 넘어졌어요', 'hit', car.z + car.hz + 1.4)
@@ -456,6 +512,10 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
           hit('hurdle', '허들에 걸려 꽈당! 스페이스로 뛰어넘어요', 'hit', hurdle + 1.3)
         } else if (caught) {
           hit('light', '삐익! 빨간불에 움직여서 처음으로', 'whistle', LIGHT_ZONE.from + 1.5)
+        } else if (strike) {
+          hit('lightning', '⚡ 번개 맞았다! 찌릿찌릿', 'hit')
+        } else if (acorn) {
+          hit('acorn', '🌰 도토리에 데굴데굴! 점프로 넘어요', 'stumble')
         } else if (banana) {
           slipped.current.add(banana.id)
           connection.send({ t: 'slip', banana: banana.id })
