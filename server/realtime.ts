@@ -46,7 +46,7 @@ import {
   type SnapshotEntry,
 } from '../src/net/protocol.ts'
 import { GARDEN_TILES, gardenTile, LOBBY_HALF, MAX_GARDEN_TREES, PLANT_REACH } from '../src/game/lobby.ts'
-import { CARVE_REACH, carveTargets, STATUE, STATUE_RESET_MS, STONE_COUNT } from '../src/game/statue.ts'
+import { beatsOf, inRedLightField, makeRound, RL_FIELD, RL_GRACE_MS, RL_OUT_MS, type RedLightPhase, type RedLightRound } from '../src/game/redlight.ts'
 
 const SNAPSHOT_INTERVAL_MS = 100
 const HEARTBEAT_INTERVAL_MS = 30_000
@@ -84,7 +84,7 @@ export type RealtimeOptions = {
   /** 함께 정원을 저장할 파일. 없으면 서버가 꺼질 때 정원도 사라진다. */
   gardenFile?: string
   /** 테스트에서 기다리는 시간을 줄일 때만 바꾼다. */
-  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number }
+  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number; /** 무궁화 놀이터 박자를 이만큼 줄이거나 늘린다(시험용) */ redLightScale?: number }
 }
 
 type Player = {
@@ -113,7 +113,6 @@ type Player = {
   lastItemAt: number
   lastFxAt: number
   lastPlantAt: number
-  lastCarveAt: number
 }
 
 type Room = {
@@ -206,16 +205,86 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const minFinishSeconds = timing.minFinishSeconds ?? MIN_FINISH_SECONDS
   const limitSeconds = timing.limitSeconds ?? GAME_LIMIT_SECONDS
   const finishGraceMs = timing.finishGraceMs ?? FINISH_GRACE_SECONDS * 1000
+  const redLightScale = timing.redLightScale ?? 1
 
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
   const players = new Map<WebSocket, Player>()
   const rooms = new Map<string, Room>()
   let nextId = 1
   let lobbyRosterDirty = false
-  /** 광장 조각상에서 깨진 돌. 다 깎으면 잠시 뒤 다시 돌덩이가 된다. */
-  const carved = new Set<number>()
-  let statueResetTimer: ReturnType<typeof setTimeout> | null = null
-  const statueMessage = (extra: { chips?: number[]; by?: number } = {}): ServerMessage => ({ t: 'statue', removed: [...carved], complete: carved.size >= STONE_COUNT, ...extra })
+  const sendLobby = (message: ServerMessage) => {
+    for (const player of lobbyPlayers()) send(player, message)
+  }
+
+  /**
+   * 무궁화 놀이터의 술래. 서버가 박자를 정해 모두 같은 순간에 외치고 돌아본다.
+   * 한 판은 외치기(chant) → 돌아보기(look) [→ 잠깐 등 돌리기(turn) → 다시 돌아보기 …] 순서다.
+   */
+  const redLight = {
+    round: null as RedLightRound | null,
+    queue: [] as { phase: RedLightPhase; ms: number; beats?: number[] }[],
+    phase: 'chant' as RedLightPhase,
+    beats: undefined as number[] | undefined,
+    startedAt: 0,
+    ms: 0,
+    lastLookEnd: 0,
+  }
+  const outUntil = new Map<number, number>()
+  const winUntil = new Map<number, number>()
+  const redLightMessage = (): ServerMessage => ({
+    t: 'redLight',
+    phase: redLight.phase,
+    ms: redLight.ms,
+    elapsed: Math.min(redLight.ms, Date.now() - redLight.startedAt),
+    pattern: redLight.round?.pattern ?? '',
+    beats: redLight.beats,
+  })
+  const nextRedLightPhase = (now: number) => {
+    if (redLight.phase === 'look') redLight.lastLookEnd = now
+    if (redLight.queue.length === 0) {
+      const round = makeRound(redLight.round?.pattern ?? null)
+      redLight.round = round
+      const scale = (ms: number) => Math.max(1, Math.round(ms * redLightScale))
+      const { beats, chantMs } = beatsOf(round.steps.map(scale))
+      redLight.queue.push({ phase: 'chant', ms: chantMs, beats })
+      round.looks.forEach((look, index) => {
+        if (index > 0) redLight.queue.push({ phase: 'turn', ms: scale(round.gapMs) })
+        redLight.queue.push({ phase: 'look', ms: scale(look) })
+      })
+    }
+    const next = redLight.queue.shift()!
+    redLight.phase = next.phase
+    redLight.ms = next.ms
+    redLight.beats = next.beats
+    redLight.startedAt = now
+    sendLobby(redLightMessage())
+  }
+  const stepRedLight = () => {
+    const now = Date.now()
+    if (!redLight.round || now - redLight.startedAt >= redLight.ms) nextRedLightPhase(now)
+  }
+
+  /** 돌아본 동안 움직였다는 신고. 정말 돌아보는 중이고 놀이터 안에 있을 때만 쏜다. */
+  const handleRedLightOut = (player: Player) => {
+    const now = Date.now()
+    if (player.inGame || now < (outUntil.get(player.id) ?? 0)) return
+    const looking = redLight.phase === 'look' && now - redLight.startedAt >= RL_GRACE_MS * redLightScale - 200
+    // 돌아보기가 막 끝났을 때 늦게 도착한 신고도 받아 준다.
+    const justEnded = redLight.phase !== 'look' && now - redLight.lastLookEnd < 400 * Math.min(1, redLightScale)
+    if (!looking && !justEnded) return
+    if (!inRedLightField(player.x, player.z, 1.5)) return
+    outUntil.set(player.id, now + RL_OUT_MS + 500)
+    sendLobby({ t: 'rlShot', id: player.id })
+  }
+
+  const handleRedLightWin = (player: Player) => {
+    const now = Date.now()
+    if (player.inGame || now < (winUntil.get(player.id) ?? 0) || now < (outUntil.get(player.id) ?? 0)) return
+    if (player.z > RL_FIELD.finishZ + 1.5 || Math.abs(player.x) > RL_FIELD.half + 1.5) return
+    winUntil.set(player.id, now + 4000)
+    sendLobby({ t: 'rlWin', id: player.id })
+  }
+
   /** 함께 정원. 오래 심은 나무가 앞에 온다. */
   let trees = loadTrees(gardenFile)
 
@@ -560,29 +629,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     for (const other of players.values()) if (other.ready) send(other, message)
   }
 
-  /** 광장 조각상을 발로 찬다. 가까이 있어야 하고, 발차기 쿨타임마다 한 번씩 깎인다. */
-  const handleCarve = (player: Player) => {
-    const now = Date.now()
-    if (player.inGame || carved.size >= STONE_COUNT) return
-    if (now - player.lastCarveAt < KICK_COOLDOWN_MS * 0.8) return
-    if (Math.hypot(player.x - STATUE.x, player.z - STATUE.z) > CARVE_REACH + REACH_SLACK) return
-    player.lastCarveAt = now
-    const chips = carveTargets(player.x, player.z, carved)
-    if (chips.length === 0) return
-    for (const index of chips) carved.add(index)
-    const message = statueMessage({ chips, by: player.id })
-    for (const other of players.values()) if (other.ready) send(other, message)
-    if (carved.size >= STONE_COUNT && !statueResetTimer) {
-      statueResetTimer = setTimeout(() => {
-        statueResetTimer = null
-        carved.clear()
-        const reset = statueMessage()
-        for (const other of players.values()) if (other.ready) send(other, reset)
-      }, STATUE_RESET_MS)
-      statueResetTimer.unref?.()
-    }
-  }
-
   const handleChat = (player: Player, raw: unknown) => {
     const text = cleanText(raw, MAX_CHAT_LENGTH)
     if (!text || LINK_PATTERN.test(text)) return
@@ -619,7 +665,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         player.ready = true
         send(player, { t: 'welcome', id: player.id })
         send(player, { t: 'garden', trees })
-        send(player, statueMessage())
+        send(player, redLightMessage())
       }
       lobbyRosterDirty = true
       if (player.room) broadcastRoom(player.room)
@@ -685,8 +731,11 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       case 'slip':
         handleSlip(player, message.banana)
         return
-      case 'carve':
-        handleCarve(player)
+      case 'rlOut':
+        handleRedLightOut(player)
+        return
+      case 'rlWin':
+        handleRedLightWin(player)
         return
       case 'plant':
         handlePlant(player, message.tile)
@@ -729,7 +778,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       lastItemAt: 0,
       lastFxAt: 0,
       lastPlantAt: 0,
-      lastCarveAt: 0,
     }
     players.set(socket, player)
     socket.on('pong', () => {
@@ -762,6 +810,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
 
   const snapshotTimer = setInterval(() => {
     const lobby = lobbyPlayers()
+    stepRedLight()
     if (lobbyRosterDirty) {
       lobbyRosterDirty = false
       const list = lobby.map(info)
@@ -795,7 +844,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   heartbeatTimer.unref()
 
   const close = () => {
-    if (statueResetTimer) clearTimeout(statueResetTimer)
     clearInterval(snapshotTimer)
     clearInterval(heartbeatTimer)
     for (const room of rooms.values()) clearTimers(room)

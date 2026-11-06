@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { recordPlanted } from '../data/garden'
 import { GHOST_SECONDS, GIANT_SECONDS } from '../game/course'
+import type { RedLightPhase } from '../game/redlight'
 import type { AreaItem, ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
 
 const RETRY_MS = 2000
@@ -33,9 +34,14 @@ export type ConnectionState = {
   bikes: Record<number, number>
   bananas: { id: number; x: number; z: number; owner: number }[]
   garden: GardenTreeView[]
-  /** 광장 조각상에서 깨진 돌과 다 깎였는지 */
-  statue: { removed: ReadonlySet<number>; complete: boolean }
+  /** 무궁화 놀이터 술래가 지금 하는 일. at은 이 단계가 시작된 시각(내 시계) */
+  redLight: RedLightView | null
 }
+
+export type RedLightView = { phase: RedLightPhase; pattern: string; beats: number[]; ms: number; at: number }
+
+/** 무궁화 놀이터에서 누가 걸려 총에 맞았거나(shot) 통과했다(win). */
+export type RedLightEvent = { kind: 'shot' | 'win'; id: number; at: number }
 
 /** 함께 정원의 나무. plantedAt은 이 화면에서 심는 장면을 본 시각(내 시계)이고, 접속 전에 심긴 나무는 0이다. */
 export type GardenTreeView = SharedTree & { plantedAt: number }
@@ -71,7 +77,7 @@ function createConnection() {
     bikes: {},
     bananas: [],
     garden: [],
-    statue: { removed: new Set(), complete: false },
+    redLight: null,
   }
   const listeners = new Set<() => void>()
   const positions = new Map<number, RemoteState>()
@@ -93,7 +99,10 @@ function createConnection() {
     for (const listener of fxListeners) listener(fx)
   }
   const plantListeners = new Set<(tile: number) => void>()
-  const chipListeners = new Set<(chips: number[], by: number) => void>()
+  const redLightListeners = new Set<(event: RedLightEvent) => void>()
+  const emitRedLight = (event: RedLightEvent) => {
+    for (const listener of redLightListeners) listener(event)
+  }
   let socket: WebSocket | null = null
   let hello: { nickname: string; color: string } | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -176,9 +185,14 @@ function createConnection() {
       case 'bikes':
         set({ bikes: message.taken })
         return
-      case 'statue':
-        set({ statue: { removed: new Set(message.removed), complete: message.complete } })
-        if (message.chips && message.by !== undefined) for (const listener of chipListeners) listener(message.chips, message.by)
+      case 'redLight':
+        set({ redLight: { phase: message.phase, pattern: message.pattern, beats: message.beats ?? state.redLight?.beats ?? [], ms: message.ms, at: performance.now() - message.elapsed } })
+        return
+      case 'rlShot':
+        emitRedLight({ kind: 'shot', id: message.id, at: performance.now() })
+        return
+      case 'rlWin':
+        emitRedLight({ kind: 'win', id: message.id, at: performance.now() })
         return
       case 'garden': {
         const known = new Map(state.garden.map((tree) => [tree.tile, tree]))
@@ -241,11 +255,11 @@ function createConnection() {
         punchListeners.delete(listener)
       }
     },
-    /** 조각상에서 돌이 깨지면 알려 준다. 파편을 날리는 데 쓴다. */
-    onChips(listener: (chips: number[], by: number) => void) {
-      chipListeners.add(listener)
+    /** 무궁화 놀이터에서 누가 총에 맞거나 통과하면 알려 준다. */
+    onRedLight(listener: (event: RedLightEvent) => void) {
+      redLightListeners.add(listener)
       return () => {
-        chipListeners.delete(listener)
+        redLightListeners.delete(listener)
       }
     },
     /** 서버가 내 나무를 심어 주면 알려 준다. */

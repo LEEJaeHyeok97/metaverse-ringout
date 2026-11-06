@@ -10,6 +10,44 @@ import { StoreLinks } from './StoreLinks'
 import { MuteButton } from './MuteButton'
 import { TouchControls } from './TouchJoystick'
 import { useTick } from './useTick'
+import { rlSelf } from '../scene/RedLight'
+import { RL_FIELD, RL_GRACE_MS, RL_SYLLABLES } from '../game/redlight'
+import { self } from '../scene/input'
+
+/** 무궁화 놀이터에 들어가 있을 때 화면 위에 지금 움직여도 되는지 크게 알려 준다. 맞으면 화면이 빨갛게 번쩍인다. */
+function RedLightBanner({ state }: { state: ConnectionState }) {
+  useTick(80)
+  const now = performance.now()
+  const light = state.redLight
+  const out = now - rlSelf.outAt < 900
+  const RED = { background: '#F0473C', color: '#ffffff' }
+  let banner: { text: string; style: { background: string; color: string }; pulse?: boolean } | null = null
+  if (now - rlSelf.winAt < 2500) banner = { text: '🎉 통과! 무궁화 꽃이 피었습니다 클리어', style: { background: '#FFF6C9', color: '#EA6E3E' } }
+  else if (now - rlSelf.outAt < 2200) banner = { text: '💥 탈락! 출발선으로 돌아가요', style: RED }
+  else if (rlSelf.playing && light) {
+    if (light.phase === 'look') banner = rlSelf.shielded ? { text: '🙈 앞사람 뒤에 숨었어요 · 움직여도 OK', style: { background: '#E3F5E9', color: '#2B2B2B' } } : { text: now - light.at < RL_GRACE_MS ? '🚨 멈춰!!' : '🚨 멈춰!! 움직이면 탈락', style: RED, pulse: true }
+    else if (light.phase === 'turn') banner = { text: '😶 아직 멈춰… 다시 볼지도?', style: { background: '#ffffff', color: '#2B2B2B' } }
+    else {
+      const said = RL_SYLLABLES.slice(0, light.beats.filter((beat) => now - light.at >= beat).length).join('')
+      banner = { text: `🌺 ${said || '…'} · 지금 달려!`, style: { background: '#FFF0F6', color: '#D93D82' } }
+    }
+  } else if (light && Math.abs(self.x) < RL_FIELD.half + 2 && self.z > RL_FIELD.startZ && self.z < RL_FIELD.startZ + 6) {
+    banner = { text: '🌺 무궁화 꽃이 피었습니다 · 출발선을 넘으면 시작!', style: { background: '#ffffff', color: '#D93D82' } }
+  }
+  return (
+    <>
+      {out && <div key={rlSelf.outAt} className="screen-flash pointer-events-none fixed inset-0" style={{ background: 'rgb(240 71 60 / 0.45)' }} />}
+      {banner && (
+        <div className="pointer-events-none absolute bottom-14 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1 max-sm:top-28 max-sm:bottom-auto">
+          <p className={`sketch px-5 py-2 text-3xl font-bold whitespace-nowrap max-sm:text-xl ${banner.pulse ? 'animate-pulse' : ''}`} style={banner.style}>
+            {banner.text}
+          </p>
+          {light && (rlSelf.playing || banner.style.color === '#D93D82') && <p className="rounded-full bg-white/85 px-3 text-lg">이번 박자: {light.pattern}</p>}
+        </div>
+      )}
+    </>
+  )
+}
 
 function StatusPill({ state }: { state: ConnectionState }) {
   const text = {
@@ -154,6 +192,7 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
   const plantable = plantableCount(useGarden())
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
+      <RedLightBanner state={state} />
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-col items-start gap-2">
           <h1 className="sketch flex items-center gap-2 px-3 py-1 text-3xl font-bold">

@@ -2,12 +2,9 @@
 
 export const LOBBY_HALF = 30
 
-import { STATUE } from './statue.ts'
+import { RL_GUARD_R, RL_GUARDS, RL_TAGGER } from './redlight.ts'
 
-/** 광장 가운데의 링아웃 로고 조각상. 발차기로 깎는다. */
-export { STATUE }
-
-/** 조각상 뒤의 거대한 링아웃 휴대폰 조형물 */
+/** 광장 뒤쪽의 거대한 링아웃 휴대폰 조형물. 가운데는 무궁화 놀이터다(redlight.ts). */
 export const PHONE_SPOT = { x: 0, z: -24, r: 3.2 }
 
 /** 대기실로 들어가는 발판. 밟으면 방 고르기 창이 열린다. */
@@ -25,7 +22,8 @@ export const BOARD_SPOTS = [
 
 export const LOBBY_OBSTACLES = [
   PHONE_SPOT,
-  STATUE,
+  RL_TAGGER,
+  ...RL_GUARDS.map((guard) => ({ ...guard, r: RL_GUARD_R })),
   ...BOARD_SPOTS.map((spot) => ({ x: spot.x, z: spot.z, r: 1.6 })),
 ]
 

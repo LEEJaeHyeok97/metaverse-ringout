@@ -7,9 +7,9 @@ import { audio } from '../lib/audio'
 import { shake } from '../game/run'
 import { useLogoImage } from '../ui/art/RingoutLogo'
 import { BRAND, COLORS, FONT } from '../lib/brand'
-import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH, STATUE } from '../game/lobby'
-import { CARVE_REACH } from '../game/statue'
-import { Statue } from './Statue'
+import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH } from '../game/lobby'
+import { inRedLightField, RL_FIELD, RL_GRACE_MS, RL_MOVE_TOLERANCE, RL_OUT_MS, shieldedFromTagger } from '../game/redlight'
+import { RedLightField, rlSelf } from './RedLight'
 import { DOUBLE_JUMP_SPEED, GRAVITY, JUMP_SPEED, KICK_PUSH, KICK_PUSH_SECONDS, KICK_STUN_SECONDS, MAX_JUMPS, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
 import { nicknameOf, tryPunch } from './combat'
 import { PunchEffects } from './PunchEffects'
@@ -277,7 +277,83 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
     [],
   )
 
+  // 무궁화 놀이터: 서버가 쏘라고 하면 쓰러졌다가 출발선 뒤로 돌아가고, 통과하면 만세한다.
+  const rl = useRef({ phaseAt: -1, moved: 0, sent: false, respawnAt: 0, lastZ: 10 })
+  useEffect(
+    () =>
+      connection.onRedLight((event) => {
+        if (event.id !== connection.getState().myId) return
+        const now = performance.now()
+        rlSelf.playing = false
+        if (event.kind === 'shot') {
+          rlSelf.outAt = now
+          stunUntil.current = now + RL_OUT_MS
+          rl.current.respawnAt = now + RL_OUT_MS
+          velocity.current.set(0, 0)
+          shake(1, 700)
+          say('💥 탈락… 출발선으로!')
+        } else {
+          rlSelf.winAt = now
+          cheerUntil.current = now + 2500
+          say('🎉 무궁화 통과!')
+        }
+      }),
+    [cheerUntil],
+  )
+
   useFollowCamera(group, { height: 10, distance: 13, look: 4 })
+
+  /** 무궁화 놀이터 판정. 출발선을 넘어 들어오면 참가, 술래가 보는 동안 움직이면 서버에 알린다. */
+  const lastPosition = useRef({ x: 0, z: 10 })
+  const stepRedLight = (position: THREE.Vector3, rise: number) => {
+    const now = performance.now()
+    const state = rl.current
+    const step = Math.hypot(position.x - lastPosition.current.x, position.z - lastPosition.current.z) + rise
+    lastPosition.current = { x: position.x, z: position.z }
+    // 쓰러졌다 일어나면 출발선 뒤로 돌아간다.
+    if (state.respawnAt && now >= state.respawnAt) {
+      state.respawnAt = 0
+      position.set((Math.random() - 0.5) * RL_FIELD.half * 1.4, 0, RL_FIELD.startZ + 2.5)
+      lastPosition.current = { x: position.x, z: position.z }
+      state.lastZ = position.z
+      return
+    }
+    if (state.respawnAt) return
+    if (!rlSelf.playing && state.lastZ > RL_FIELD.startZ && position.z <= RL_FIELD.startZ && Math.abs(position.x) <= RL_FIELD.half) {
+      rlSelf.playing = true
+      say('🌺 시작! 술래가 볼 땐 멈춰요')
+    }
+    state.lastZ = position.z
+    if (rlSelf.playing && !inRedLightField(position.x, position.z, 0.6)) rlSelf.playing = false
+    const light = connection.getState().redLight
+    if (light && light.at !== state.phaseAt) {
+      state.phaseAt = light.at
+      state.moved = 0
+      state.sent = false
+    }
+    const others = [...connection.positions.values()]
+    rlSelf.shielded = rlSelf.playing && shieldedFromTagger(position, others)
+    if (!rlSelf.playing) return
+    if (position.z <= RL_FIELD.finishZ) {
+      rlSelf.playing = false
+      connection.send({ t: 'rlWin' })
+      return
+    }
+    if (light?.phase !== 'look' || now - light.at < RL_GRACE_MS) {
+      state.moved = 0
+      return
+    }
+    // 앞사람 뒤에 숨어 있으면 술래 눈에 안 보인다.
+    if (rlSelf.shielded) {
+      state.moved = 0
+      return
+    }
+    state.moved += step
+    if (state.moved > RL_MOVE_TOLERANCE && !state.sent) {
+      state.sent = true
+      connection.send({ t: 'rlOut' })
+    }
+  }
 
   useFrame((_, rawDelta) => {
     const node = group.current
@@ -302,14 +378,16 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
 
     if (input.punchCount !== lastPunch.current) {
       lastPunch.current = input.punchCount
-      if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y)) punchUntil.current = performance.now() + 300
+      if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y)) {
+        punchUntil.current = performance.now() + 300
+        rl.current.moved += 1
+      }
     }
     if (input.kickCount !== lastKick.current) {
       lastKick.current = input.kickCount
       if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y, true)) {
         kickUntil.current = performance.now() + 400
-        // 조각상 가까이에서 차면 돌이 깨진다. 어느 돌이 깨질지는 서버가 정한다.
-        if (Math.hypot(node.position.x - STATUE.x, node.position.z - STATUE.z) < CARVE_REACH) connection.send({ t: 'carve' })
+        rl.current.moved += 1
       }
     }
 
@@ -354,7 +432,9 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
         jump.current.count = 0
       }
     }
+    const lastY = node.position.y
     node.position.y = jump.current.y
+    stepRedLight(node.position, Math.abs(node.position.y - lastY))
 
     const speed = velocity.current.length()
     if (speed > 0.3) {
@@ -447,8 +527,7 @@ export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, n
         <meshBasicMaterial map={grid} />
       </mesh>
       <FloorRing radius={LOBBY_HALF - 1} />
-      <FloorRing radius={9} position={[STATUE.x, 0.02, STATUE.z]} color={COLORS.pencil} width={0.05} />
-      <Statue />
+      <RedLightField />
       <Label text={`${BRAND.name} 월드`} position={[0, 9.4, PHONE_SPOT.z - 1]} size={1.1} color={COLORS.accent} />
       <Label text={BRAND.slogan} position={[0, 8.4, PHONE_SPOT.z - 1]} size={0.5} background={null} />
       <GiantPhone onOpen={() => onOpenInfo(INFO_SPOTS.length - 1)} />

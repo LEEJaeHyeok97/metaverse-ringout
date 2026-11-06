@@ -55,8 +55,10 @@ export type ClientMessage =
   /** 나에게 쓰는 아이템(부스터, 방패)을 썼다. 모두의 화면에 궁극기 연출을 띄운다. */
   | { t: 'fx'; kind: 'booster' | 'shield' }
   | { t: 'plant'; tile: number }
-  /** 광장 조각상을 발로 찼다. 깨질 돌은 서버가 고른다. */
-  | { t: 'carve' }
+  /** 무궁화 놀이터: 술래가 돌아본 동안 내가 움직였다. 서버가 확인하고 경비대가 쏘게 한다. */
+  | { t: 'rlOut' }
+  /** 무궁화 놀이터: 도착선을 넘었다. */
+  | { t: 'rlWin' }
 
 export type ServerMessage =
   | { t: 'welcome'; id: number }
@@ -82,8 +84,14 @@ export type ServerMessage =
   | { t: 'bananas'; list: { id: number; x: number; z: number; owner: number }[] }
   /** 함께 정원의 모든 나무. 방금 누가 심었으면 planted에 그 타일과 심은 사람이 온다. */
   | { t: 'garden'; trees: SharedTree[]; planted?: { tile: number; by: number } }
-  /** 조각상: removed는 지금까지 깨진 돌 전부, chips는 방금 깨진 돌과 찬 사람. 다 깎았으면 complete */
-  | { t: 'statue'; removed: number[]; chips?: number[]; by?: number; complete: boolean }
+  /**
+   * 무궁화 놀이터의 술래가 지금 하는 일. chant면 beats(글자마다 나오는 시각)대로 외치고, look이면 돌아보고 있고,
+   * turn이면 잠깐 등을 돌렸다 다시 본다. ms는 이 단계 전체 길이, elapsed는 이미 지난 시간이다.
+   */
+  | { t: 'redLight'; phase: 'chant' | 'look' | 'turn'; ms: number; elapsed: number; pattern: string; beats?: number[] }
+  /** 움직이다 걸려 경비대가 쐈다. */
+  | { t: 'rlShot'; id: number }
+  | { t: 'rlWin'; id: number }
 
 export function animIndex(anim: Anim) {
   return ANIMS.indexOf(anim)
