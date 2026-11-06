@@ -1,6 +1,7 @@
 import { growth } from '../data/garden'
 import * as course from './course'
-import type { ItemKind } from './course'
+import type { ItemKind, RideKind } from './course'
+import type { ShownQuiz } from '../data/quiz'
 import type { GuideId } from '../data/ringout'
 
 /** 내 출근길 진행 상태. 3D 화면이 매 프레임 쓰고 HUD가 주기적으로 읽는다. */
@@ -25,6 +26,16 @@ export const run = {
   reward: null as ReturnType<typeof growth> | null,
   /** 따릉이를 타고 있으면 내릴 시각 */
   rideUntil: 0,
+  /** 지금 타고 있는(마지막으로 탄) 탈것 */
+  rideKind: 'bike' as RideKind,
+  /** 달팽이 저주로 느려진 동안 */
+  slowUntil: 0,
+  /** 미끄럼틀을 타는 중 */
+  sliding: false,
+  /** 링아웃 스핑크스가 지금 나에게 낸 문제. 구간에 들어가면 정한다. */
+  quiz: null as ShownQuiz | null,
+  /** 오답 통로로 떨어진 횟수 */
+  quizWrong: 0,
   /** 가까이 세워진 빈 따릉이 */
   nearBike: null as number | null,
   /** 타겠다고 서버에 물어본 따릉이 */
@@ -64,6 +75,11 @@ export function resetRun(startAt: number, lane: number) {
   run.toasts = []
   run.reward = null
   run.rideUntil = 0
+  run.rideKind = 'bike'
+  run.slowUntil = 0
+  run.sliding = false
+  run.quiz = null
+  run.quizWrong = 0
   run.nearBike = null
   run.pendingBike = null
   run.coffees = new Set()

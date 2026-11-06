@@ -36,6 +36,8 @@ import { Label } from '../Label'
 import { Campus } from './Campus'
 import { OnCourse, RoadSurface } from './onCourse'
 import { Specials } from './Specials'
+import { Sphinx } from './Sphinx'
+import { Slide } from './Slide'
 
 const WALL_HEIGHT = 2
 const WALL = 0.25
@@ -316,6 +318,8 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
         </OnCourse>
       ))}
       <Specials />
+      <Sphinx />
+      <Slide />
       <OnCourse z={SUBWAY_Z}>
         <SubwayWall />
       </OnCourse>

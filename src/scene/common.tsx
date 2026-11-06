@@ -2,6 +2,7 @@ import { useMemo, type RefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { COLORS } from '../lib/brand'
+import { run } from '../game/run'
 import { Ink } from './ink'
 
 /** 모눈 공책 바닥 무늬 */
@@ -78,5 +79,12 @@ export function useFollowCamera(target: RefObject<THREE.Object3D | null>, option
     const blend = 1 - Math.exp(-delta * 5)
     camera.position.lerp(cameraTarget, blend)
     camera.lookAt(lookTarget)
+    // 맞거나 때리면 화면이 짧게 흔들린다.
+    const now = performance.now()
+    if (now < run.shakeUntil) {
+      const power = run.shakePower * Math.min(1, (run.shakeUntil - now) / 300)
+      camera.position.x += (Math.random() - 0.5) * power
+      camera.position.y += (Math.random() - 0.5) * power
+    }
   })
 }

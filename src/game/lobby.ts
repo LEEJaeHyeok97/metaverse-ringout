@@ -2,8 +2,13 @@
 
 export const LOBBY_HALF = 30
 
-/** 가운데 거대한 링아웃 휴대폰 조형물 */
-export const PHONE_SPOT = { x: 0, z: -8, r: 3.2 }
+import { STATUE } from './statue.ts'
+
+/** 광장 가운데의 링아웃 로고 조각상. 발차기로 깎는다. */
+export { STATUE }
+
+/** 조각상 뒤의 거대한 링아웃 휴대폰 조형물 */
+export const PHONE_SPOT = { x: 0, z: -24, r: 3.2 }
 
 /** 대기실로 들어가는 발판. 밟으면 방 고르기 창이 열린다. */
 export const MATCH_PAD = { x: 0, z: 18, r: 3 }
@@ -20,6 +25,7 @@ export const BOARD_SPOTS = [
 
 export const LOBBY_OBSTACLES = [
   PHONE_SPOT,
+  STATUE,
   ...BOARD_SPOTS.map((spot) => ({ x: spot.x, z: spot.z, r: 1.6 })),
 ]
 

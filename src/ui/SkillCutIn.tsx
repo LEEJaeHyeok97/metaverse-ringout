@@ -9,7 +9,13 @@ const SKILLS: Record<FxEvent['kind'], { icon: string; name: string; item: string
   banana: { icon: '🍌', name: '하늘에서 바나나가!', item: '바나나', color: 'from-[#D9A400] via-[#FFD84D] to-[#FFF6C9]', flash: '#FFF6C9' },
   balloon: { icon: '🌊', name: '대해일 물폭탄', item: '물풍선', color: 'from-[#1E6FB8] via-[#3FA9E8] to-[#BFE3F5]', flash: '#BFE3F5' },
   ufo: { icon: '🛸', name: '외계 모선 강림', item: '우주선', color: 'from-[#3A4766] via-[#6B7FA8] to-[#E7F27C]', flash: '#E7F27C' },
-  warp: { icon: '🌀', name: '차원 귀환문', item: '귀환 포털', color: 'from-[#4B1FA8] via-[#A259FF] to-[#E3C8FF]', flash: '#E3C8FF' },
+  zap: { icon: '⚡', name: '천벌의 낙뢰', item: '번개', color: 'from-[#3A2A8C] via-[#6E5BD8] to-[#FFF3A0]', flash: '#FFF3A0' },
+  bomb: { icon: '💣', name: '메가 폭탄', item: '폭탄', color: 'from-[#5A1E0E] via-[#E9483B] to-[#FFC531]', flash: '#FFD8A8' },
+  tornado: { icon: '🌪️', name: '폭풍 회오리', item: '회오리', color: 'from-[#4A5266] via-[#8C93A3] to-[#E4EEF6]', flash: '#E4EEF6' },
+  giant: { icon: '🍄', name: '거인화', item: '거인 버섯', color: 'from-[#B8281E] via-[#F0473C] to-[#FFF6E5]', flash: '#FFE0DC' },
+  ghost: { icon: '👻', name: '유령 변신', item: '유령', color: 'from-[#5B4E80] via-[#A79BD0] to-[#FFFFFF]', flash: '#F3EFFF' },
+  snail: { icon: '🐌', name: '달팽이의 저주', item: '달팽이 저주', color: 'from-[#3E7A2E] via-[#8BC34A] to-[#E9A65A]', flash: '#E3F5E9' },
+  warp: { icon: '🌀', name: '차원 귀환문', item: '귀가 포털', color: 'from-[#4B1FA8] via-[#A259FF] to-[#E3C8FF]', flash: '#E3C8FF' },
 }
 
 const SHOW_MS = 1700

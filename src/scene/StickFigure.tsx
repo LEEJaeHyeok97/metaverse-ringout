@@ -4,8 +4,17 @@ import * as THREE from 'three'
 import type { Anim } from '../net/protocol'
 import { COLORS } from '../lib/brand'
 import { Ink, penMaterial } from './ink'
+import { BikeModel, RideModel } from './Rides'
+import type { RideKind } from '../game/course'
 
-export type Motion = { anim: Anim; speed: number }
+// 세워 둔 따릉이를 그리던 곳에서 계속 쓸 수 있게 다시 내보낸다.
+export { BikeModel }
+
+/** 차 종류 동작 → 탈것 */
+const DRIVES: Partial<Record<Anim, RideKind>> = { scooter: 'scooter', car: 'car', sports: 'sports', truck: 'truck' }
+
+/** ghost면 하얀 유령 천을 뒤집어쓴다. */
+export type Motion = { anim: Anim; speed: number; ghost?: boolean }
 
 const LINE = 0.05
 const THIGH = 0.46
@@ -112,6 +121,31 @@ function poseFor(anim: Anim, t: number, speed: number, phase: number): Pose {
     }
     case 'punch':
       return { ...REST, lean: 0.25, hipL: 0.4, kneeL: 0.3, hipR: -0.3, shoulderR: 1.55, shoulderRz: 0, elbowR: 0, shoulderL: -0.5, elbowL: -1.2, shoulderLz: 0.4 }
+    case 'scooter':
+      // 스쿠터 안장에 앉아 두 손으로 핸들을 잡는다.
+      return { ...REST, lean: 0.15, bob: -0.2, hipL: 1.3, kneeL: 1.1, hipR: 1.3, kneeR: 1.1, shoulderL: 1.2, shoulderR: 1.2, shoulderLz: 0.15, shoulderRz: -0.15, elbowL: -0.2, elbowR: -0.2 }
+    case 'car':
+    case 'sports':
+    case 'truck':
+      // 운전석에 앉아 핸들을 잡는다. 트럭은 운전석이 높다.
+      return {
+        ...REST,
+        lean: anim === 'sports' ? -0.15 : 0,
+        bob: anim === 'truck' ? 0.05 : -0.22,
+        hipL: 1.5,
+        kneeL: 1.4,
+        hipR: 1.5,
+        kneeR: 1.4,
+        shoulderL: 1.1 + Math.sin(t * 6) * 0.08,
+        shoulderR: 1.1 - Math.sin(t * 6) * 0.08,
+        shoulderLz: 0.2,
+        shoulderRz: -0.2,
+        elbowL: -0.4,
+        elbowR: -0.4,
+      }
+    case 'slide':
+      // 미끄럼틀: 앉아서 두 다리를 앞으로 뻗고 만세!
+      return { ...REST, lean: -0.35, bob: -0.45, hipL: 1.5, kneeL: 0.1, hipR: 1.5, kneeR: 0.1, shoulderLz: 2.7 + Math.sin(t * 18) * 0.15, shoulderRz: -2.7 - Math.sin(t * 18) * 0.15 }
     case 'kick':
       // 몸을 뒤로 젖히고 오른발을 앞으로 쭉 뻗는다.
       return { ...REST, lean: -0.3, hipR: 1.7, kneeR: 0, hipL: -0.15, kneeL: 0.35, shoulderLz: 1.3, shoulderRz: -1.3, shoulderL: -0.3, shoulderR: -0.3 }
@@ -142,6 +176,8 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
   const stars = useRef<THREE.Group>(null)
   const zzz = useRef<THREE.Group>(null)
   const bike = useRef<THREE.Group>(null)
+  const drives = useRef<Partial<Record<RideKind, THREE.Group | null>>>({})
+  const ghost = useRef<THREE.Group>(null)
   const bubble = useRef<THREE.Mesh>(null)
   const ufo = useRef<THREE.Group>(null)
   const phase = useRef(Math.random() * 10)
@@ -176,6 +212,11 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
       stars.current.rotation.y = t * 5
     }
     if (bike.current) bike.current.visible = anim === 'ride'
+    for (const [kind, node] of Object.entries(drives.current)) if (node) node.visible = DRIVES[anim] === kind
+    if (ghost.current) {
+      ghost.current.visible = motion.current.ghost === true
+      ghost.current.position.y = 0.25 + Math.sin(t * 3) * 0.12
+    }
     if (bubble.current) {
       bubble.current.visible = anim === 'trapped'
       bubble.current.position.y = 1.05 + pose.bob
@@ -199,6 +240,38 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
     <group ref={root}>
       <group ref={bike} visible={false}>
         <BikeModel />
+      </group>
+      {(['scooter', 'car', 'sports', 'truck'] as const).map((kind) => (
+        <group
+          key={kind}
+          visible={false}
+          ref={(node) => {
+            drives.current[kind] = node
+          }}
+        >
+          <RideModel kind={kind} />
+        </group>
+      ))}
+      {/* 유령: 하얀 천을 뒤집어쓰고 둥실둥실 */}
+      <group ref={ghost} visible={false}>
+        <mesh position={[0, 1.15, 0]} scale={[0.75, 1.05, 0.75]}>
+          <sphereGeometry args={[1, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62]} />
+          <meshToonMaterial color="#ffffff" transparent opacity={0.85} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position={[0, 0.75, 0]}>
+          <cylinderGeometry args={[0.6, 0.85, 1, 20, 1, true]} />
+          <meshToonMaterial color="#ffffff" transparent opacity={0.85} side={THREE.DoubleSide} />
+        </mesh>
+        {[-0.22, 0.22].map((x) => (
+          <mesh key={x} position={[x, 1.55, 0.66]}>
+            <sphereGeometry args={[0.1, 10, 8]} />
+            <meshBasicMaterial color={COLORS.ink} />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.3, 0.7]} scale={[1, 1.3, 1]}>
+          <sphereGeometry args={[0.08, 10, 8]} />
+          <meshBasicMaterial color={COLORS.ink} />
+        </mesh>
       </group>
       <mesh ref={bubble} visible={false}>
         <sphereGeometry args={[1.05, 24, 16]} />
@@ -264,47 +337,6 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
   )
 }
 
-const bikeFrame = '#3BB273'
-
-/** 따릉이. 앞이 +z이고 안장 높이가 엉덩이에 맞는다. 세워 둔 자전거에도 쓴다. */
-export function BikeModel() {
-  return (
-    <group>
-      {[-0.55, 0.55].map((z) => (
-        <mesh key={z} position={[0, 0.36, z]} rotation={[0, Math.PI / 2, 0]}>
-          <torusGeometry args={[0.33, 0.04, 8, 24]} />
-          <meshBasicMaterial color="#1A1A1A" />
-        </mesh>
-      ))}
-      <mesh position={[0, 0.55, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.045, 0.045, 1.1, 6]} />
-        <Ink color={bikeFrame} thickness={1.4} />
-      </mesh>
-      <mesh position={[0, 0.72, -0.18]} rotation={[0.35, 0, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.5, 6]} />
-        <Ink color={bikeFrame} thickness={1.4} />
-      </mesh>
-      <mesh position={[0, 0.94, -0.26]}>
-        <boxGeometry args={[0.16, 0.06, 0.3]} />
-        <meshBasicMaterial color="#1A1A1A" />
-      </mesh>
-      <mesh position={[0, 0.8, 0.5]} rotation={[-0.25, 0, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.7, 6]} />
-        <Ink color={bikeFrame} thickness={1.4} />
-      </mesh>
-      <mesh position={[0, 1.13, 0.58]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.035, 0.035, 0.6, 6]} />
-        <meshBasicMaterial color="#1A1A1A" />
-      </mesh>
-      <mesh position={[0, 0.85, 0.72]}>
-        <boxGeometry args={[0.3, 0.2, 0.22]} />
-        <Ink color="#ffffff" thickness={1.4} />
-      </mesh>
-    </group>
-  )
-}
-
-/** 우주선. 아래로 빛줄기를 쏜다. */
 export function UfoModel() {
   return (
     <group>

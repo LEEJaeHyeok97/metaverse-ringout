@@ -108,7 +108,7 @@ export function App() {
   }
 
   const inGame = activeMatch !== null && state.match !== null
-  const match = inGame ? { ...activeMatch.match, finishes: state.match!.finishes } : null
+  const match = inGame ? { ...activeMatch.match, finishes: state.match!.finishes, closingAt: state.match!.closingAt } : null
 
   return (
     <main className="relative h-full w-full overflow-hidden">

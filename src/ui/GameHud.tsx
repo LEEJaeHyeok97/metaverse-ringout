@@ -1,11 +1,12 @@
 import { TREE_ARRIVALS } from '../data/garden'
 import { GAME_TIPS } from '../data/ringout'
-import { activeMap, gustAt, specialAt, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
+import { activeMap, BIKES, gustAt, QUIZ, RIDES, specialAt, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
 import { gameSeconds, run, showGuide, toast } from '../game/run'
 import { BRAND } from '../lib/brand'
 import { connection, type ConnectionState, type GameInfo } from '../net/connection'
 import type { PlayerInfo, ResultRow } from '../net/protocol'
 import { pressAction, setOverlayOpen } from '../scene/input'
+import { nicknameOf } from '../scene/combat'
 import { RingoutApp } from './RingoutApp'
 import { GuideCard } from './GuideCard'
 import { StoreLinks } from './StoreLinks'
@@ -75,6 +76,48 @@ function SpecialSign({ t }: { t: number }) {
   if (special === 'acorns') return <p className="sketch bg-[#FBE3C8] px-3 text-xl">🌰 도토리는 점프로! 🍂 낙엽은 폴짝</p>
   if (special === 'ice') return <p className="sketch bg-[#DFF1FF] px-3 text-xl">🧊 미끄러워요 · 🚜 제설차 조심</p>
   return null
+}
+
+/** 1등이 도착하면 남은 시간을 크게 센다. 이 시간 안에 못 들어오면 게임이 끝난다. */
+function ClosingCountdown({ match, myId }: { match: GameInfo; myId: number | null }) {
+  if (match.closingAt === undefined) return null
+  const left = Math.max(0, Math.ceil((match.closingAt - performance.now()) / 1000))
+  const first = match.finishes.find((finish) => finish.rank === 1)
+  const winner = first ? (first.id === myId ? '내가' : `${nicknameOf(first.id)}님이`) : '1등이'
+  const done = run.phase === 'finished'
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-40 flex flex-col items-center gap-1">
+      <p className="sketch bg-[#FFF6C9] px-4 py-1 text-2xl font-bold">🏁 {winner} 1등으로 도착!</p>
+      {!done && (
+        <p key={left} className={`pop-in text-7xl font-bold tabular-nums drop-shadow-[3px_3px_0_#fff] ${left <= 3 ? 'text-accent' : 'text-ink'}`}>
+          {left}
+        </p>
+      )}
+      <p className="sketch bg-white px-3 text-xl">{done ? `${left}초 뒤 결과가 나와요` : `${left}초 안에 도착하지 못하면 게임이 끝나요!`}</p>
+    </div>
+  )
+}
+
+/** 링아웃 스핑크스: 문제와 세 통로의 보기를 크게 보여 준다. */
+function QuizCard() {
+  const quiz = run.quiz
+  if (run.phase !== 'running' || !quiz || !QUIZ || run.z > QUIZ.from || run.z <= QUIZ.wallZ) return null
+  const sides = ['⬅️ 왼쪽', '⬆️ 가운데', '➡️ 오른쪽']
+  const colors = ['bg-[#FFB4A2]', 'bg-[#FFE08A]', 'bg-[#A8D8FF]']
+  return (
+    <div className="sketch pop-in absolute top-52 left-1/2 flex w-[min(560px,92vw)] -translate-x-1/2 flex-col items-center gap-2 bg-[#FFF6C9] px-4 py-3">
+      <p className="text-lg text-accent">🗿 링아웃 스핑크스의 넌센스 퀴즈 · 정답 통로로만 지나갈 수 있어요!</p>
+      <p className="text-center text-3xl font-bold">Q. {quiz.question}</p>
+      <div className="grid w-full grid-cols-3 gap-2">
+        {quiz.options.map((option, i) => (
+          <div key={i} className={`flex flex-col items-center rounded-xl border-2 border-ink px-2 py-1 ${colors[i]}`}>
+            <span className="text-sm">{sides[i]}</span>
+            <span className="text-center text-xl font-bold">{option}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function Progress({ entrants, myId }: { entrants: PlayerInfo[]; myId: number | null }) {
@@ -203,6 +246,9 @@ function ItemSlot() {
 function ItemStatus() {
   const now = performance.now()
   const riding = now < run.rideUntil
+  const myId = connection.getState().myId
+  const parked = run.nearBike !== null ? BIKES.find((bike) => bike.id === run.nearBike) : undefined
+  const nearRide = parked ? RIDES[parked.kind] : null
   return (
     <div className="absolute inset-x-0 bottom-[22%] flex flex-col items-center gap-1">
       {!run.appSet && !run.appOpen && (
@@ -210,8 +256,19 @@ function ItemStatus() {
           {run.nearDesk ? <>📱 <b>스페이스</b>로 휴대폰 들기</> : '📱 책상 위에서 울리는 휴대폰으로 가요'}
         </p>
       )}
-      {run.nearBike !== null && <p className="sketch pop-in bg-[#E3F5E9] px-4 py-1 text-2xl">🚲 <b>스페이스</b>로 따릉이 타기</p>}
-      {riding && <p className="sketch bg-[#E3F5E9] px-4 py-1 text-2xl font-bold">🚲 따릉이 {Math.ceil((run.rideUntil - now) / 1000)}초</p>}
+      {nearRide && (
+        <p className="sketch pop-in bg-[#E3F5E9] px-4 py-1 text-2xl">
+          {nearRide.icon} <b>스페이스</b>로 {nearRide.name} 타기{nearRide.ram ? ' · 치면 기절!' : ''}
+        </p>
+      )}
+      {riding && (
+        <p className="sketch bg-[#E3F5E9] px-4 py-1 text-2xl font-bold">
+          {RIDES[run.rideKind].icon} {RIDES[run.rideKind].name} {Math.ceil((run.rideUntil - now) / 1000)}초
+        </p>
+      )}
+      {myId !== null && connection.isGiant(myId) && <p className="sketch bg-[#FFE0DC] px-4 py-1 text-2xl font-bold">🍄 거인! 부딪히면 튕겨내요</p>}
+      {myId !== null && connection.isGhost(myId) && <p className="sketch bg-[#F3EFFF] px-4 py-1 text-2xl font-bold">👻 유령! 무엇이든 통과</p>}
+      {now < run.slowUntil && <p className="sketch bg-[#E3F5E9] px-4 py-1 text-2xl font-bold">🐌 달팽이 저주… 느릿느릿 {Math.ceil((run.slowUntil - now) / 1000)}초</p>}
       <p className="rounded-full bg-white/80 px-3 text-base text-pencil max-sm:hidden">WASD 이동 · 스페이스 점프(2단)/타기 · E 아이템 · F 때리기 · G 발차기</p>
     </div>
   )
@@ -308,7 +365,15 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
 
   return (
     <div className="pointer-events-none absolute inset-0 p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
+      {run.sliding && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="speed-lines absolute inset-[-20%] rotate-90 opacity-40" />
+          <p className="pop-in absolute top-[30%] w-full text-center text-6xl font-bold text-white [-webkit-text-stroke:2px_#1A1A1A] max-sm:text-4xl">슈우우우웅~!!</p>
+        </div>
+      )}
       <SkillCutIn />
+      <QuizCard />
+      {!state.results && <ClosingCountdown match={match} myId={state.myId} />}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-2">
           <AlarmCard t={t} />

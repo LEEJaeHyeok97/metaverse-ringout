@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { recordPlanted } from '../data/garden'
-import type { ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
+import { GHOST_SECONDS, GIANT_SECONDS } from '../game/course'
+import type { AreaItem, ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
 
 const RETRY_MS = 2000
 const CLOSE_FULL = 4001
@@ -12,7 +13,7 @@ export type Status = 'connecting' | 'online' | 'offline' | 'full'
 export type ChatLine = { key: number; id: number; nickname: string; text: string; at: number }
 
 /** 시작 시각은 받은 순간의 내 시계(performance.now) 기준으로 바꿔 둔다. */
-export type GameInfo = { startAt: number; lanes: Record<number, number>; map: string; finishes: { id: number; ms: number; rank: number }[] }
+export type GameInfo = { startAt: number; lanes: Record<number, number>; map: string; finishes: { id: number; ms: number; rank: number }[]; /** 1등이 도착해 게임이 끝나는 시각(내 시계) */ closingAt?: number }
 
 export type ConnectionState = {
   status: Status
@@ -32,16 +33,18 @@ export type ConnectionState = {
   bikes: Record<number, number>
   bananas: { id: number; x: number; z: number; owner: number }[]
   garden: GardenTreeView[]
+  /** 광장 조각상에서 깨진 돌과 다 깎였는지 */
+  statue: { removed: ReadonlySet<number>; complete: boolean }
 }
 
 /** 함께 정원의 나무. plantedAt은 이 화면에서 심는 장면을 본 시각(내 시계)이고, 접속 전에 심긴 나무는 0이다. */
 export type GardenTreeView = SharedTree & { plantedAt: number }
 
-/** 아이템 궁극기 연출. 바나나는 놓인 자리(x, z)를, 남에게 쓴 아이템은 맞은 사람(to)을 함께 준다. */
-export type FxEvent = { kind: 'booster' | 'shield' | 'banana' | 'balloon' | 'ufo' | 'warp'; from: number; to?: number; x?: number; z?: number; at: number }
+/** 아이템 궁극기 연출. 남에게 쓴 아이템은 맞은 사람(to)을, 바나나와 허공에 쓴 아이템은 떨어진 자리(x, z)를 함께 준다. */
+export type FxEvent = { kind: 'booster' | 'shield' | 'banana' | 'balloon' | 'ufo' | 'warp' | AreaItem; from: number; to?: number; x?: number; z?: number; at: number }
 
 /** 맞거나 아이템에 당한 일. 3D 화면이 효과와 기절을 그리는 데 쓴다. */
-export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'balloon' | 'ufo' | 'warp' }
+export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'ram' | 'balloon' | 'ufo' | 'warp' }
 
 /** 다른 사람의 위치. 스냅샷이 올 때마다 목표값만 바꾸고 화면은 매 프레임 따라간다. */
 export type RemoteState = { x: number; y: number; z: number; h: number; a: number; seenAt: number }
@@ -68,6 +71,7 @@ function createConnection() {
     bikes: {},
     bananas: [],
     garden: [],
+    statue: { removed: new Set(), complete: false },
   }
   const listeners = new Set<() => void>()
   const positions = new Map<number, RemoteState>()
@@ -81,10 +85,15 @@ function createConnection() {
     for (const listener of punchListeners) listener(hit)
   }
   const fxListeners = new Set<(fx: FxEvent) => void>()
+  /** 거인이나 유령이 된 사람과 풀리는 시각(내 시계). 화면과 부딪힘 판정이 읽는다. */
+  const status = { giant: new Map<number, number>(), ghost: new Map<number, number>() }
   const emitFx = (fx: FxEvent) => {
+    if (fx.kind === 'giant') status.giant.set(fx.from, fx.at + GIANT_SECONDS * 1000)
+    if (fx.kind === 'ghost') status.ghost.set(fx.from, fx.at + GHOST_SECONDS * 1000)
     for (const listener of fxListeners) listener(fx)
   }
   const plantListeners = new Set<(tile: number) => void>()
+  const chipListeners = new Set<(chips: number[], by: number) => void>()
   let socket: WebSocket | null = null
   let hello: { nickname: string; color: string } | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -133,6 +142,9 @@ function createConnection() {
       case 'finished':
         if (state.match) set({ match: { ...state.match, finishes: [...state.match.finishes, { id: message.id, ms: message.ms, rank: message.rank }] } })
         return
+      case 'closing':
+        if (state.match) set({ match: { ...state.match, closingAt: performance.now() + message.endsIn } })
+        return
       case 'results':
         set({ results: message.rows })
         return
@@ -146,14 +158,14 @@ function createConnection() {
         set({ error: message.message })
         return
       case 'punched':
-        emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kick ? 'kick' : 'punch' })
+        emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.ram ? 'ram' : message.kick ? 'kick' : 'punch' })
         return
       case 'trapped':
         emitFx({ kind: message.kind, from: message.from, to: message.to, at: performance.now() })
         emitHit({ from: message.from, to: message.to, at: performance.now(), kind: message.kind })
         return
       case 'fx':
-        emitFx({ kind: message.kind, from: message.from, at: performance.now() })
+        emitFx({ kind: message.kind, from: message.from, x: message.x, z: message.z, at: performance.now() })
         return
       case 'bananas': {
         const known = new Set(state.bananas.map((banana) => banana.id))
@@ -163,6 +175,10 @@ function createConnection() {
       }
       case 'bikes':
         set({ bikes: message.taken })
+        return
+      case 'statue':
+        set({ statue: { removed: new Set(message.removed), complete: message.complete } })
+        if (message.chips && message.by !== undefined) for (const listener of chipListeners) listener(message.chips, message.by)
         return
       case 'garden': {
         const known = new Map(state.garden.map((tree) => [tree.tile, tree]))
@@ -213,12 +229,23 @@ function createConnection() {
     getState: () => state,
     positions,
     bubbles,
+    status,
+    /** 이 사람이 지금 거인/유령인지 */
+    isGiant: (id: number) => (status.giant.get(id) ?? 0) > performance.now(),
+    isGhost: (id: number) => (status.ghost.get(id) ?? 0) > performance.now(),
     punches,
     /** 맞은 순간 바로 기절시키려고 프레임을 기다리지 않고 알려 준다. */
     onPunch(listener: (hit: HitEvent) => void) {
       punchListeners.add(listener)
       return () => {
         punchListeners.delete(listener)
+      }
+    },
+    /** 조각상에서 돌이 깨지면 알려 준다. 파편을 날리는 데 쓴다. */
+    onChips(listener: (chips: number[], by: number) => void) {
+      chipListeners.add(listener)
+      return () => {
+        chipListeners.delete(listener)
       }
     },
     /** 서버가 내 나무를 심어 주면 알려 준다. */

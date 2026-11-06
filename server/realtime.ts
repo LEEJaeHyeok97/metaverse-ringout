@@ -7,11 +7,15 @@ import {
   COUNTDOWN_MS,
   FINISH_Z,
   GAME_LIMIT_SECONDS,
+  FINISH_GRACE_SECONDS,
   MAX_ROOM_PLAYERS,
   MIN_FINISH_SECONDS,
   STREET_HALF_W,
   WALK_SPEED,
-  RIDE_FACTOR,
+  MAX_RIDE_FACTOR,
+  RIDES,
+  BOMB_AHEAD,
+  GHOST_SECONDS,
   layoutOf,
   randomMapId,
   BIKE_REACH,
@@ -37,9 +41,12 @@ import {
   type RoomView,
   type ServerMessage,
   type SharedTree,
+  AREA_ITEMS,
+  type AreaItem,
   type SnapshotEntry,
 } from '../src/net/protocol.ts'
 import { GARDEN_TILES, gardenTile, LOBBY_HALF, MAX_GARDEN_TREES, PLANT_REACH } from '../src/game/lobby.ts'
+import { CARVE_REACH, carveTargets, STATUE, STATUE_RESET_MS, STONE_COUNT } from '../src/game/statue.ts'
 
 const SNAPSHOT_INTERVAL_MS = 100
 const HEARTBEAT_INTERVAL_MS = 30_000
@@ -54,10 +61,12 @@ const ROOM_CODE_LENGTH = 4
 const LOBBY_COUNTDOWN_MS = 3000
 // 화면의 위치는 서버보다 조금 늦게 오므로 앞으로 나아간 거리에 여유를 둔다.
 const PROGRESS_SLACK = 1.5
-const MAX_SPEED = WALK_SPEED * RIDE_FACTOR * 1.25
+const MAX_SPEED = WALK_SPEED * MAX_RIDE_FACTOR * 1.25
 // 서버의 위치는 화면보다 조금 늦으므로 닿는 거리에 여유를 둔다.
 const REACH_SLACK = 1
 const FINISH_SLACK = 3
+/** 허공에 쓴 아이템이 떨어지는 거리(내 앞) */
+const MISS_AHEAD = 10
 const LINK_PATTERN = /(https?:\/\/|www\.)/i
 /** 한 사람이 나무를 너무 자주 심지 못하게 한다. */
 const PLANT_COOLDOWN_MS = 4000
@@ -75,7 +84,7 @@ export type RealtimeOptions = {
   /** 함께 정원을 저장할 파일. 없으면 서버가 꺼질 때 정원도 사라진다. */
   gardenFile?: string
   /** 테스트에서 기다리는 시간을 줄일 때만 바꾼다. */
-  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number }
+  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number }
 }
 
 type Player = {
@@ -104,6 +113,7 @@ type Player = {
   lastItemAt: number
   lastFxAt: number
   lastPlantAt: number
+  lastCarveAt: number
 }
 
 type Room = {
@@ -118,6 +128,8 @@ type Room = {
   entrants: Map<number, PlayerInfo & { lane: number }>
   /** 자전거 번호 → 탄 사람 */
   bikes: Map<number, number>
+  /** 탄 사람 → 탄 탈것 번호와 탄 시각. 들이받기를 확인할 때 쓴다. */
+  rides: Map<number, { bike: number; at: number }>
   bananas: { id: number; x: number; z: number; owner: number }[]
   nextBanana: number
   /** 이번 판의 맵. 출발 카운트다운을 시작할 때 고른다. */
@@ -193,12 +205,17 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const gameCountdownMs = timing.gameCountdownMs ?? COUNTDOWN_MS
   const minFinishSeconds = timing.minFinishSeconds ?? MIN_FINISH_SECONDS
   const limitSeconds = timing.limitSeconds ?? GAME_LIMIT_SECONDS
+  const finishGraceMs = timing.finishGraceMs ?? FINISH_GRACE_SECONDS * 1000
 
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
   const players = new Map<WebSocket, Player>()
   const rooms = new Map<string, Room>()
   let nextId = 1
   let lobbyRosterDirty = false
+  /** 광장 조각상에서 깨진 돌. 다 깎으면 잠시 뒤 다시 돌덩이가 된다. */
+  const carved = new Set<number>()
+  let statueResetTimer: ReturnType<typeof setTimeout> | null = null
+  const statueMessage = (extra: { chips?: number[]; by?: number } = {}): ServerMessage => ({ t: 'statue', removed: [...carved], complete: carved.size >= STONE_COUNT, ...extra })
   /** 함께 정원. 오래 심은 나무가 앞에 온다. */
   let trees = loadTrees(gardenFile)
 
@@ -274,6 +291,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     room.finished.clear()
     room.entrants.clear()
     room.bikes.clear()
+    room.rides.clear()
     room.bananas = []
     // 다섯 집 중 가운데부터 채워서 혼자 해도 화면 가운데 집에서 시작한다.
     const order = [2, 1, 3, 0, 4]
@@ -352,6 +370,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       finished: new Map(),
       entrants: new Map(),
       bikes: new Map(),
+      rides: new Map(),
       bananas: [],
       nextBanana: 1,
       mapId: '',
@@ -393,6 +412,11 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     room.finished.set(player.id, ms)
     const rank = room.finished.size
     for (const member of room.members) if (member.inGame) send(member, { t: 'finished', id: player.id, ms, rank })
+    // 1등이 들어오면 남은 사람에게 10초를 준다.
+    if (rank === 1 && room.members.some((member) => !room.finished.has(member.id))) {
+      broadcastGame(room, { t: 'closing', endsIn: finishGraceMs })
+      room.timers.push(setTimeout(() => endGame(room), finishGraceMs))
+    }
     if (room.members.every((member) => room.finished.has(member.id))) endGame(room)
   }
 
@@ -422,6 +446,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     if (!bike || room.bikes.has(bike.id)) return
     if (Math.hypot(bike.x - player.x, bike.z - player.z) > BIKE_REACH + REACH_SLACK) return
     room.bikes.set(bike.id, player.id)
+    room.rides.set(player.id, { bike: bike.id, at: Date.now() })
     const taken = Object.fromEntries(room.bikes)
     for (const member of room.members) if (member.inGame) send(member, { t: 'bikes', taken })
   }
@@ -448,22 +473,51 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       broadcastGame(room, { t: 'bananas', list: room.bananas })
       return
     }
+    // 범위 아이템: 서버는 쓴 자리만 알리고, 맞았는지는 각자 화면이 정한다.
+    if (AREA_ITEMS.includes(kind as AreaItem)) {
+      player.lastItemAt = now
+      const area = kind as AreaItem
+      // 유령은 그동안 주먹과 발차기도 통과한다.
+      if (area === 'ghost') player.immuneUntil = Math.max(player.immuneUntil, now + GHOST_SECONDS * 1000)
+      broadcastGame(room, { t: 'fx', from: player.id, kind: area, x: player.x, z: area === 'bomb' ? player.z - BOMB_AHEAD : player.z })
+      return
+    }
+    // 맞힐 사람이 없으면 내 앞 허공에 쓴다. 아이템은 사라지고 연출만 모두에게 보인다.
+    const miss = (missed: 'balloon' | 'ufo' | 'warp') => broadcastGame(room, { t: 'fx', from: player.id, kind: missed, x: player.x, z: player.z - MISS_AHEAD })
     if (kind === 'ufo') {
       // 가장 앞선 사람을 노린다. 내가 1등이면 2등을 노린다.
       const leader = rivals.sort((a, b) => a.z - b.z)[0]
       player.lastItemAt = now
       if (leader) broadcastGame(room, { t: 'trapped', from: player.id, to: leader.id, kind: 'ufo' })
+      else miss('ufo')
       return
     }
     if (kind === 'balloon' || kind === 'warp') {
-      const target = rivals.find((member) => member.id === targetId)
-      if (!target) return
-      // 물풍선은 닿는 거리 안에서, 귀가 포털은 나보다 앞선 사람에게만 쓸 수 있다.
-      if (kind === 'balloon' && Math.hypot(target.x - player.x, target.z - player.z) > BALLOON_RANGE + REACH_SLACK * 3) return
-      if (kind === 'warp' && target.z > player.z) return
       player.lastItemAt = now
-      broadcastGame(room, { t: 'trapped', from: player.id, to: target.id, kind })
+      const target = rivals.find((member) => member.id === targetId)
+      // 물풍선은 닿는 거리 안에서, 귀가 포털은 나보다 앞선 사람에게만 맞는다. 아니면 허공에 날아간다.
+      const reaches =
+        target !== undefined &&
+        (kind === 'balloon' ? Math.hypot(target.x - player.x, target.z - player.z) <= BALLOON_RANGE + REACH_SLACK * 3 : target.z <= player.z)
+      if (target && reaches) broadcastGame(room, { t: 'trapped', from: player.id, to: target.id, kind })
+      else miss(kind)
     }
+  }
+
+  /** 차로 들이받기. 지금 들이받을 수 있는 탈것을 타고 있고, 상대가 닿는 거리에 있어야 한다. */
+  const handleRam = (player: Player, targetId: unknown) => {
+    const room = player.room
+    const now = Date.now()
+    if (!room || room.phase !== 'playing' || !player.inGame) return
+    const ride = room.rides.get(player.id)
+    const bike = ride && layoutOf(room.mapId).bikes.find((candidate) => candidate.id === ride.bike)
+    const stats = bike ? RIDES[bike.kind] : null
+    if (!ride || !stats?.ram || now - ride.at > stats.seconds * 1000 + 500) return
+    const target = room.members.find((member) => member.id === targetId && member.inGame && member !== player)
+    if (!target || now < target.immuneUntil) return
+    if (Math.hypot(target.x - player.x, target.z - player.z) > stats.ram.radius + REACH_SLACK * 2) return
+    target.immuneUntil = now + stats.ram.stun * 1000 + PUNCH_IMMUNE_MS
+    broadcastGame(room, { t: 'punched', from: player.id, to: target.id, ram: true })
   }
 
   /** 부스터와 방패는 효과가 내 화면에만 있으므로, 연출만 같은 방 사람들에게 알린다. */
@@ -506,6 +560,29 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     for (const other of players.values()) if (other.ready) send(other, message)
   }
 
+  /** 광장 조각상을 발로 찬다. 가까이 있어야 하고, 발차기 쿨타임마다 한 번씩 깎인다. */
+  const handleCarve = (player: Player) => {
+    const now = Date.now()
+    if (player.inGame || carved.size >= STONE_COUNT) return
+    if (now - player.lastCarveAt < KICK_COOLDOWN_MS * 0.8) return
+    if (Math.hypot(player.x - STATUE.x, player.z - STATUE.z) > CARVE_REACH + REACH_SLACK) return
+    player.lastCarveAt = now
+    const chips = carveTargets(player.x, player.z, carved)
+    if (chips.length === 0) return
+    for (const index of chips) carved.add(index)
+    const message = statueMessage({ chips, by: player.id })
+    for (const other of players.values()) if (other.ready) send(other, message)
+    if (carved.size >= STONE_COUNT && !statueResetTimer) {
+      statueResetTimer = setTimeout(() => {
+        statueResetTimer = null
+        carved.clear()
+        const reset = statueMessage()
+        for (const other of players.values()) if (other.ready) send(other, reset)
+      }, STATUE_RESET_MS)
+      statueResetTimer.unref?.()
+    }
+  }
+
   const handleChat = (player: Player, raw: unknown) => {
     const text = cleanText(raw, MAX_CHAT_LENGTH)
     if (!text || LINK_PATTERN.test(text)) return
@@ -542,6 +619,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         player.ready = true
         send(player, { t: 'welcome', id: player.id })
         send(player, { t: 'garden', trees })
+        send(player, statueMessage())
       }
       lobbyRosterDirty = true
       if (player.room) broadcastRoom(player.room)
@@ -598,11 +676,17 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       case 'item':
         handleItem(player, message.kind, message.target)
         return
+      case 'ram':
+        handleRam(player, message.target)
+        return
       case 'fx':
         handleFx(player, message.kind)
         return
       case 'slip':
         handleSlip(player, message.banana)
+        return
+      case 'carve':
+        handleCarve(player)
         return
       case 'plant':
         handlePlant(player, message.tile)
@@ -645,6 +729,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       lastItemAt: 0,
       lastFxAt: 0,
       lastPlantAt: 0,
+      lastCarveAt: 0,
     }
     players.set(socket, player)
     socket.on('pong', () => {
@@ -710,6 +795,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   heartbeatTimer.unref()
 
   const close = () => {
+    if (statueResetTimer) clearTimeout(statueResetTimer)
     clearInterval(snapshotTimer)
     clearInterval(heartbeatTimer)
     for (const room of rooms.values()) clearTimers(room)

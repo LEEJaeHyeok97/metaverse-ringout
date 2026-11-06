@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { courseFrame, type Frame } from '../../game/course'
+import { BOMB_FUSE_SECONDS, BOMB_RADIUS, courseFrame, SNAIL_SECONDS, TORNADO_SECONDS, tornadoAt, type Frame } from '../../game/course'
+import { Bolt } from './Specials'
 import { run, shake } from '../../game/run'
 import { audio } from '../../lib/audio'
 import { COLORS } from '../../lib/brand'
@@ -13,7 +14,20 @@ import { Ink, penMaterial } from '../ink'
  * 판정과는 상관없는 장식이라 각자 화면에서 시각만 맞춰 그린다.
  */
 
-export const FX_MS: Record<FxEvent['kind'], number> = { booster: 3000, shield: 2600, banana: 1700, balloon: 2000, ufo: 2800, warp: 1800 }
+export const FX_MS: Record<FxEvent['kind'], number> = {
+  booster: 3000,
+  shield: 2600,
+  banana: 1700,
+  balloon: 2300,
+  ufo: 2800,
+  warp: 1800,
+  zap: 1400,
+  bomb: (BOMB_FUSE_SECONDS + 1.1) * 1000,
+  tornado: TORNADO_SECONDS * 1000,
+  giant: 1400,
+  ghost: 1200,
+  snail: SNAIL_SECONDS * 1000 + 200,
+}
 
 type Active = FxEvent & { key: number }
 
@@ -25,6 +39,12 @@ function anchorOf(id: number | undefined): { x: number; z: number } | null {
   if (id === connection.getState().myId) return { x: run.x, z: run.z }
   const other = connection.positions.get(id)
   return other ? { x: other.x, z: other.z } : null
+}
+
+/** 연출이 일어나는 자리: 맞은 사람이 있으면 그 사람, 허공에 썼으면 떨어진 자리 */
+function spotOf(fx: FxEvent) {
+  if (fx.to !== undefined) return anchorOf(fx.to)
+  return fx.x !== undefined && fx.z !== undefined ? { x: fx.x, z: fx.z } : null
 }
 
 function toWorld(x: number, y: number, z: number, out: THREE.Vector3) {
@@ -77,6 +97,18 @@ export function ItemFx() {
             return <Mothership key={fx.key} fx={fx} />
           case 'warp':
             return <Vortex key={fx.key} fx={fx} />
+          case 'zap':
+            return <Thunder key={fx.key} fx={fx} />
+          case 'bomb':
+            return <Bomb key={fx.key} fx={fx} />
+          case 'tornado':
+            return <Tornado key={fx.key} fx={fx} />
+          case 'giant':
+            return <Mushroom key={fx.key} fx={fx} />
+          case 'ghost':
+            return <Smoke key={fx.key} fx={fx} />
+          case 'snail':
+            return <SnailCurse key={fx.key} fx={fx} />
         }
       })}
     </>
@@ -348,16 +380,30 @@ function GiantBanana({ fx }: { fx: Active }) {
 const DROPS = 26
 const dropGeometry = new THREE.SphereGeometry(0.28, 8, 6)
 
+/** 물풍선이 시전자 손에서 날아가 떨어지는 시간 */
+const THROW_SECONDS = 0.3
+
 function Tsunami({ fx }: { fx: Active }) {
+  const thrown = useRef<THREE.Mesh>(null)
+  const thrower = useRef(anchorOf(fx.from))
   const column = useRef<THREE.Mesh>(null)
   const ring = useRef<THREE.Mesh>(null)
   const drops = useRef<(THREE.Mesh | null)[]>([])
   const center = useMemo(() => new THREE.Vector3(), [])
   const dirs = useMemo(() => Array.from({ length: DROPS }, (_, i) => ({ angle: (i / DROPS) * Math.PI * 2 + (i % 3) * 0.2, up: 9 + (i % 5) * 2, out: 4 + (i % 4) * 1.5 })), [])
   useFrame(() => {
-    const anchor = anchorOf(fx.to)
+    const anchor = spotOf(fx)
     if (!anchor) return
-    const s = (performance.now() - fx.at) / 1000
+    const elapsed = (performance.now() - fx.at) / 1000
+    // 먼저 물풍선이 포물선을 그리며 날아간다.
+    const from = thrower.current
+    if (thrown.current) {
+      const f = clamp01(elapsed / THROW_SECONDS)
+      thrown.current.visible = from !== null && f < 1
+      if (from) toWorld(from.x + (anchor.x - from.x) * f, 1.5 + Math.sin(f * Math.PI) * 5, from.z + (anchor.z - from.z) * f, thrown.current.position)
+    }
+    const s = elapsed - THROW_SECONDS
+    if (s < 0) return
     toWorld(anchor.x, 0, anchor.z, center)
     const rise = easeOut(clamp01(s / 0.35))
     const fall = clamp01((s - 1.1) / 0.8)
@@ -383,11 +429,15 @@ function Tsunami({ fx }: { fx: Active }) {
   })
   return (
     <>
-      <mesh ref={column}>
+      <mesh ref={thrown} visible={false}>
+        <sphereGeometry args={[0.6, 16, 12]} />
+        <Ink color="#6EC3F2" thickness={2} />
+      </mesh>
+      <mesh ref={column} scale={[1, 0.01, 1]}>
         <cylinderGeometry args={[0.9, 1.3, 1, 20, 1, true]} />
         <meshBasicMaterial color="#6EC3F2" transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} scale={0.01}>
         <ringGeometry args={[0.75, 1, 40]} />
         <meshBasicMaterial color="#3FA9E8" transparent depthWrite={false} />
       </mesh>
@@ -414,7 +464,7 @@ function Mothership({ fx }: { fx: Active }) {
   const beam = useRef<THREE.Mesh>(null)
   const lights = useRef<THREE.Group>(null)
   useFrame(() => {
-    const anchor = anchorOf(fx.to)
+    const anchor = spotOf(fx)
     if (!anchor) return
     const s = (performance.now() - fx.at) / 1000
     const total = FX_MS.ufo / 1000
@@ -467,7 +517,7 @@ function Vortex({ fx }: { fx: Active }) {
   const group = useRef<THREE.Group>(null)
   const rings = useRef<(THREE.Mesh | null)[]>([])
   const pillar = useRef<THREE.Mesh>(null)
-  const origin = useRef(anchorOf(fx.to))
+  const origin = useRef(spotOf(fx))
   useFrame(() => {
     const anchor = origin.current
     const node = group.current
@@ -507,5 +557,291 @@ function Vortex({ fx }: { fx: Active }) {
         <meshBasicMaterial color="#E3C8FF" transparent depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
     </group>
+  )
+}
+
+/** 쓴 사람을 뺀, 지금 같은 방에서 달리는 사람들 */
+function othersOf(caster: number) {
+  const myId = connection.getState().myId
+  const ids = [...connection.positions.keys()].filter((id) => id !== caster)
+  if (myId !== null && myId !== caster) ids.push(myId)
+  return ids
+}
+
+// ---- ⚡ 천벌의 낙뢰: 다른 사람 모두의 머리 위로 벼락이 떨어진다 ----
+
+function Thunder({ fx }: { fx: Active }) {
+  const targets = useMemo(() => othersOf(fx.from), [fx.from])
+  const bolts = useRef<(THREE.Group | null)[]>([])
+  useFrame(() => {
+    const s = (performance.now() - fx.at) / 1000
+    bolts.current.forEach((bolt, i) => {
+      const anchor = anchorOf(targets[i])
+      if (!bolt || !anchor) return
+      // 번쩍번쩍 두세 번 깜빡인다.
+      bolt.visible = s < 0.9 && Math.sin(s * 40 + i) > -0.3
+      toWorld(anchor.x, 0, anchor.z, bolt.position)
+      bolt.scale.set(1.2, 1 - Math.max(0, s - 0.6), 1.2)
+    })
+  })
+  return (
+    <>
+      {targets.map((id, i) => (
+        <group
+          key={id}
+          ref={(node) => {
+            bolts.current[i] = node
+          }}
+        >
+          <Bolt />
+          <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[1.6, 24]} />
+            <meshBasicMaterial color="#FFF3A0" transparent opacity={0.7} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+    </>
+  )
+}
+
+// ---- 💣 메가 폭탄: 포물선으로 날아가 떨어진 뒤 크게 터진다 ----
+
+function Bomb({ fx }: { fx: Active }) {
+  const bomb = useRef<THREE.Group>(null)
+  const blast = useRef<THREE.Mesh>(null)
+  const core = useRef<THREE.Mesh>(null)
+  const ring = useRef<THREE.Mesh>(null)
+  const from = useRef(anchorOf(fx.from))
+  const exploded = useRef(false)
+  useFrame(() => {
+    const spot = spotOf(fx)
+    if (!spot) return
+    const s = (performance.now() - fx.at) / 1000
+    const fly = clamp01(s / BOMB_FUSE_SECONDS)
+    const start = from.current ?? spot
+    if (bomb.current) {
+      bomb.current.visible = fly < 1
+      toWorld(start.x + (spot.x - start.x) * fly, 1.4 + Math.sin(fly * Math.PI) * 6, start.z + (spot.z - start.z) * fly, bomb.current.position)
+      bomb.current.rotation.x = s * 8
+    }
+    const b = clamp01((s - BOMB_FUSE_SECONDS) / 0.9)
+    if (s >= BOMB_FUSE_SECONDS && !exploded.current) {
+      exploded.current = true
+      audio.effect('boom')
+      shake(0.5, 450)
+    }
+    const visible = s >= BOMB_FUSE_SECONDS
+    if (blast.current) {
+      blast.current.visible = visible
+      toWorld(spot.x, 0.5, spot.z, blast.current.position)
+      blast.current.scale.setScalar(BOMB_RADIUS * easeOut(clamp01(b * 2.5)))
+      ;(blast.current.material as THREE.MeshBasicMaterial).opacity = 0.75 * (1 - b)
+    }
+    if (core.current) {
+      core.current.visible = visible
+      core.current.position.copy(blast.current?.position ?? core.current.position)
+      core.current.scale.setScalar(BOMB_RADIUS * 0.6 * easeOut(clamp01(b * 4)) * (1 - b))
+    }
+    if (ring.current) {
+      ring.current.visible = visible
+      toWorld(spot.x, 0.1, spot.z, ring.current.position)
+      ring.current.scale.setScalar(1 + b * BOMB_RADIUS * 2)
+      ;(ring.current.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - b)
+    }
+  })
+  return (
+    <>
+      <group ref={bomb}>
+        <mesh>
+          <sphereGeometry args={[0.6, 16, 12]} />
+          <Ink color="#3A3A3A" thickness={2} />
+        </mesh>
+        <mesh position={[0, 0.7, 0]}>
+          <cylinderGeometry args={[0.06, 0.06, 0.4, 6]} />
+          <meshBasicMaterial color="#A8754B" />
+        </mesh>
+        <mesh position={[0, 0.95, 0]}>
+          <sphereGeometry args={[0.15, 8, 6]} />
+          <meshBasicMaterial color={COLORS.yellow} />
+        </mesh>
+      </group>
+      <mesh ref={blast} visible={false}>
+        <sphereGeometry args={[1, 24, 16]} />
+        <meshBasicMaterial color="#FF9A3C" transparent depthWrite={false} />
+      </mesh>
+      <mesh ref={core} visible={false}>
+        <sphereGeometry args={[1, 20, 14]} />
+        <meshBasicMaterial color="#FFF3A0" />
+      </mesh>
+      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.8, 1, 48]} />
+        <meshBasicMaterial color={COLORS.ink} transparent depthWrite={false} />
+      </mesh>
+    </>
+  )
+}
+
+// ---- 🌪️ 폭풍 회오리: 겹겹이 도는 고리가 앞으로 구불구불 나아간다 ----
+
+function Tornado({ fx }: { fx: Active }) {
+  const group = useRef<THREE.Group>(null)
+  const rings = useRef<(THREE.Mesh | null)[]>([])
+  const origin = useMemo(() => ({ x: fx.x ?? 0, z: fx.z ?? 0 }), [fx.x, fx.z])
+  useFrame(() => {
+    const node = group.current
+    if (!node) return
+    const s = (performance.now() - fx.at) / 1000
+    const spot = tornadoAt(s, origin)
+    toWorld(spot.x, 0, spot.z, node.position)
+    const fade = 1 - clamp01((s - TORNADO_SECONDS + 0.4) / 0.4)
+    const grow = easeOut(clamp01(s / 0.3))
+    node.scale.setScalar(grow * fade)
+    rings.current.forEach((ring, i) => {
+      if (!ring) return
+      ring.rotation.z = s * (8 + i) * (i % 2 ? 1 : -1)
+      ring.position.x = Math.sin(s * 6 + i * 0.7) * 0.25 * i * 0.3
+    })
+  })
+  return (
+    <group ref={group}>
+      {Array.from({ length: 9 }, (_, i) => (
+        <mesh
+          key={i}
+          position={[0, 0.3 + i * 0.6, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          ref={(mesh) => {
+            rings.current[i] = mesh
+          }}
+        >
+          <torusGeometry args={[0.4 + i * 0.28, 0.1, 6, 24, Math.PI * 1.5]} />
+          <meshBasicMaterial color={i % 2 ? '#B9C0CC' : '#8C93A3'} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+// ---- 🍄 거인화: 머리 위로 버섯이 퐁 솟고 반짝인다 (몸이 커지는 건 캐릭터가 그린다) ----
+
+function Mushroom({ fx }: { fx: Active }) {
+  const group = useRef<THREE.Group>(null)
+  useFrame(() => {
+    const anchor = anchorOf(fx.from)
+    const node = group.current
+    if (!anchor || !node) return
+    const s = (performance.now() - fx.at) / 1000
+    toWorld(anchor.x, 5 + easeOut(clamp01(s / 0.4)) * 1.5, anchor.z, node.position)
+    node.scale.setScalar(easeOut(clamp01(s / 0.3)) * (1 - clamp01((s - 1) / 0.4)))
+    node.rotation.y = s * 4
+  })
+  return (
+    <group ref={group}>
+      <mesh position={[0, 0.5, 0]} scale={[1, 0.7, 1]}>
+        <sphereGeometry args={[1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <Ink color="#F0473C" thickness={2} />
+      </mesh>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <mesh key={i} position={[Math.cos(i * 1.26) * 0.6, 0.85, Math.sin(i * 1.26) * 0.6]}>
+          <sphereGeometry args={[0.16, 8, 6]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.1, 0]}>
+        <cylinderGeometry args={[0.35, 0.42, 0.8, 12]} />
+        <Ink color="#FFF6E5" thickness={2} />
+      </mesh>
+    </group>
+  )
+}
+
+// ---- 👻 유령 변신: 펑 하고 연기가 피어오른다 ----
+
+function Smoke({ fx }: { fx: Active }) {
+  const puffs = useRef<(THREE.Mesh | null)[]>([])
+  const dirs = useMemo(() => Array.from({ length: 10 }, (_, i) => ({ angle: (i / 10) * Math.PI * 2, rise: 0.6 + (i % 3) * 0.5 })), [])
+  useFrame(() => {
+    const anchor = anchorOf(fx.from)
+    if (!anchor) return
+    const s = (performance.now() - fx.at) / 1000
+    puffs.current.forEach((puff, i) => {
+      if (!puff) return
+      const d = dirs[i]
+      toWorld(anchor.x + Math.cos(d.angle) * (0.4 + s * 2), 0.5 + d.rise * s * 2, anchor.z + Math.sin(d.angle) * (0.4 + s * 2), puff.position)
+      puff.scale.setScalar((0.5 + s) * (1 - clamp01((s - 0.7) / 0.5)))
+    })
+  })
+  return (
+    <>
+      {dirs.map((_, i) => (
+        <mesh
+          key={i}
+          ref={(mesh) => {
+            puffs.current[i] = mesh
+          }}
+        >
+          <sphereGeometry args={[0.6, 12, 8]} />
+          <meshBasicMaterial color={i % 2 ? '#E9E4F5' : '#ffffff'} transparent opacity={0.85} depthWrite={false} />
+        </mesh>
+      ))}
+    </>
+  )
+}
+
+// ---- 🐌 달팽이의 저주: 앞선 사람들 머리 위에 달팽이가 올라탄다 ----
+
+function SnailModel() {
+  return (
+    <group>
+      <mesh position={[0, 0.25, 0]} scale={[0.5, 0.25, 1]}>
+        <sphereGeometry args={[1, 14, 10]} />
+        <Ink color="#C7F0BD" thickness={1.8} />
+      </mesh>
+      <mesh position={[0, 0.75, -0.15]} rotation={[0, Math.PI / 2, 0]}>
+        <torusGeometry args={[0.38, 0.2, 10, 20]} />
+        <Ink color="#E9A65A" thickness={1.8} />
+      </mesh>
+      {[-0.15, 0.15].map((x) => (
+        <mesh key={x} position={[x, 0.65, 0.8]} rotation={[0.4, 0, 0]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.5, 5]} />
+          <meshBasicMaterial color={COLORS.ink} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function SnailCurse({ fx }: { fx: Active }) {
+  const targets = useMemo(() => {
+    const myId = connection.getState().myId
+    // 쓴 사람보다 앞선(z가 작은) 사람만 저주를 받는다.
+    return othersOf(fx.from).filter((id) => {
+      const spot = id === myId ? { z: run.z } : connection.positions.get(id)
+      return spot !== undefined && fx.z !== undefined && spot.z < fx.z
+    })
+  }, [fx.from, fx.z])
+  const snails = useRef<(THREE.Group | null)[]>([])
+  useFrame(() => {
+    const s = (performance.now() - fx.at) / 1000
+    snails.current.forEach((snail, i) => {
+      const anchor = anchorOf(targets[i])
+      if (!snail || !anchor) return
+      toWorld(anchor.x, 2.6 + Math.sin(s * 4) * 0.1, anchor.z, snail.position)
+      snail.scale.setScalar(easeOut(clamp01(s / 0.3)) * (1 - clamp01((s - SNAIL_SECONDS + 0.3) / 0.3)))
+      snail.rotation.y = Math.sin(s * 2) * 0.5
+    })
+  })
+  return (
+    <>
+      {targets.map((id, i) => (
+        <group
+          key={id}
+          ref={(node) => {
+            snails.current[i] = node
+          }}
+        >
+          <SnailModel />
+        </group>
+      ))}
+    </>
   )
 }

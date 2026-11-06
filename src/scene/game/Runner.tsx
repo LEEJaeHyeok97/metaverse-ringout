@@ -63,8 +63,29 @@ import {
   PUNCH_STUN_SECONDS,
   pushOutOfBox,
   pushOutOfCircle,
-  RIDE_FACTOR,
-  RIDE_SECONDS,
+  RIDES,
+  RAM_PUSH,
+  ZAP_STUN_SECONDS,
+  BOMB_FUSE_SECONDS,
+  BOMB_RADIUS,
+  BOMB_STUN_SECONDS,
+  TORNADO_SECONDS,
+  TORNADO_RADIUS,
+  TORNADO_STUN_SECONDS,
+  tornadoAt,
+  GIANT_FACTOR,
+  GIANT_SCALE,
+  GIANT_BUMP,
+  SNAIL_SECONDS,
+  SNAIL_FACTOR,
+  QUIZ,
+  quizWalls,
+  quizDoorAt,
+  QUIZ_WRONG_STUN,
+  groundAt,
+  onSlide,
+  SLIDE_SPEED,
+  SLIDE_STEER,
   ringIndex,
   rollItem,
   SHIELD_SECONDS,
@@ -78,7 +99,8 @@ import {
   WARP_Z,
 } from '../../game/course'
 import { growth, recordArrival } from '../../data/garden'
-import { gameSeconds, run, showGuide, toast } from '../../game/run'
+import { gameSeconds, run, shake, showGuide, toast } from '../../game/run'
+import { pickQuiz } from '../../data/quiz'
 import { audio } from '../../lib/audio'
 import { connection, type HitEvent } from '../../net/connection'
 import { animIndex, type Anim, type PlayerInfo } from '../../net/protocol'
@@ -112,6 +134,7 @@ const HITS = {
   banana: { anim: 'stumble', seconds: BANANA_SLIP_SECONDS },
   lightning: { anim: 'down', seconds: 1.3 },
   acorn: { anim: 'stumble', seconds: 1 },
+  quiz: { anim: 'down', seconds: QUIZ_WRONG_STUN },
 } satisfies Record<string, Stun>
 
 const overviewCamera = new THREE.Vector3(0, 26, 22)
@@ -164,11 +187,95 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
   /** 맵만의 구간에 처음 들어갈 때 한 번만 알려 준다. */
   const specialTold = useRef(false)
   const plowTold = useRef(false)
+  const slideTold = useRef(false)
   const sendTimer = useRef(0)
   const slipped = useRef(new Set<number>())
+  /** 아직 터지지 않았거나 지나가는 중인 범위 아이템(폭탄, 회오리) */
+  const areas = useRef<{ kind: 'bomb' | 'tornado'; from: number; x: number; z: number; at: number; done: boolean }[]>([])
+  /** 들이받기와 거인 부딪힘은 같은 사람에게 연달아 일어나지 않게 한다. */
+  const lastBump = useRef(new Map<number, number>())
+  const scale = useRef(1)
   const [reward, setReward] = useState<ReturnType<typeof growth> | null>(null)
   const size = useThree((state) => state.size)
+  const sceneCamera = useThree((state) => state.camera)
+  // 게임이 끝나 광장으로 돌아갈 때 미끄럼틀에서 넓혀 둔 시야를 되돌린다.
+  useEffect(
+    () => () => {
+      const perspective = sceneCamera as THREE.PerspectiveCamera
+      perspective.fov = 50
+      perspective.updateProjectionMatrix()
+    },
+    [sceneCamera],
+  )
   const portrait = size.height > size.width
+
+  /** 이 자리에서 멀어지는 쪽으로 distance만큼 날아간다. 자리를 모르면 뒤(집 쪽)로 날아간다. */
+  const pushAway = (from: { x: number; z: number } | undefined | null, distance: number, now = performance.now()) => {
+    const p = pos.current
+    let dx = from ? p.x - from.x : 0
+    let dz = from ? p.z - from.z : 1
+    const length = Math.hypot(dx, dz) || 1
+    dx /= length
+    dz /= length
+    const speed = distance / KICK_PUSH_SECONDS
+    knock.current = { x: dx * speed, z: dz * speed, until: now + KICK_PUSH_SECONDS * 1000 }
+  }
+
+  /** 범위 아이템에 맞았다. 방패가 있으면 막는다. 막았으면 false */
+  const areaStun = (anim: Anim, seconds: number, message: string) => {
+    const now = performance.now()
+    const myId = connection.getState().myId
+    if (run.phase !== 'running' || now < run.stunUntil || (myId !== null && connection.isGhost(myId))) return false
+    if (now < run.shieldUntil) {
+      run.shieldUntil = 0
+      audio.effect('wake')
+      toast('🛡️ 방패로 막았어요!', 'good')
+      return false
+    }
+    run.stunUntil = now + seconds * 1000
+    immuneUntil.current = run.stunUntil + IMMUNE_MS
+    stunAnim.current = anim
+    velocity.current.set(0, 0)
+    run.rideUntil = 0
+    audio.effect('smack')
+    shake(0.8, 400)
+    toast(message)
+    return true
+  }
+
+  // 개발 서버에서만: 브라우저 자동 점검이 코스의 원하는 곳으로 바로 옮겨 볼 수 있게 한다.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const hook = (window as unknown as { __ringout?: Record<string, unknown> }).__ringout
+    if (hook) hook.teleport = (x: number, z: number) => pos.current.set(x, 0, z)
+  }, [])
+
+  // 범위 아이템: 서버는 쓴 자리와 시각만 알려 주고, 맞았는지는 내 화면이 정한다.
+  useEffect(
+    () =>
+      connection.onFx((fx) => {
+        const myId = connection.getState().myId
+        if (fx.from === myId || run.phase !== 'running') return
+        const who = nicknameOf(fx.from)
+        if (fx.kind === 'zap') {
+          areaStun('down', ZAP_STUN_SECONDS, `⚡ ${who}님의 번개! 찌릿`)
+        } else if (fx.kind === 'snail') {
+          // 쓴 사람보다 앞선 사람만 느려진다.
+          if (fx.z !== undefined && pos.current.z < fx.z) {
+            if (performance.now() < run.shieldUntil) {
+              run.shieldUntil = 0
+              toast('🛡️ 방패로 달팽이 저주를 막았어요!', 'good')
+            } else {
+              run.slowUntil = performance.now() + SNAIL_SECONDS * 1000
+              toast(`🐌 ${who}님의 달팽이 저주! ${SNAIL_SECONDS}초 동안 느릿느릿`)
+            }
+          }
+        } else if ((fx.kind === 'bomb' || fx.kind === 'tornado') && fx.x !== undefined && fx.z !== undefined) {
+          areas.current.push({ kind: fx.kind, from: fx.from, x: fx.x, z: fx.z, at: fx.at, done: false })
+        }
+      }),
+    [],
+  )
 
   // 맞거나 아이템에 당하면 다음 프레임을 기다리지 않고 바로 반응한다.
   useEffect(
@@ -176,12 +283,15 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       connection.onPunch((hit: HitEvent) => {
         const myId = connection.getState().myId
         if (hit.from === myId && hit.to !== myId) {
-          const done = { punch: '퍽!', kick: '👟 뻥!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!' }[hit.kind]
-          audio.effect('hit')
+          const done = { punch: '퍽!', kick: '👟 뻥!', ram: '💥 쾅!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!' }[hit.kind]
+          audio.effect('smack')
+          // 때린 쪽 화면도 짧고 세게 흔들어 손맛을 낸다.
+          if (hit.kind === 'punch' || hit.kind === 'kick' || hit.kind === 'ram') shake(hit.kind === 'punch' ? 0.25 : 0.4, 160)
           toast(`${done} (${nicknameOf(hit.to)})`, 'info')
         }
         if (hit.to !== myId || run.phase !== 'running') return
         const now = performance.now()
+        if (myId !== null && connection.isGhost(myId)) return
         if (now < run.shieldUntil) {
           run.shieldUntil = 0
           audio.effect('wake')
@@ -196,23 +306,23 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
           run.rideUntil = 0
         }
         const who = nicknameOf(hit.from)
-        audio.effect('hit')
+        audio.effect('smack')
+        const from = connection.positions.get(hit.from)
         if (hit.kind === 'punch') {
           stun('down', PUNCH_STUN_SECONDS)
+          pushAway(from, 1.2)
+          shake(0.6, 300)
           toast(`${who}님에게 맞았어요!`)
         } else if (hit.kind === 'kick') {
           stun('down', KICK_STUN_SECONDS)
-          // 찬 사람에게서 멀어지는 쪽으로 날아간다. 찬 사람 위치를 모르면 뒤(집 쪽)로 날아간다.
-          const from = connection.positions.get(hit.from)
-          const p = pos.current
-          let dx = from ? p.x - from.x : 0
-          let dz = from ? p.z - from.z : 1
-          const length = Math.hypot(dx, dz) || 1
-          dx /= length
-          dz /= length
-          const speed = KICK_PUSH / KICK_PUSH_SECONDS
-          knock.current = { x: dx * speed, z: dz * speed, until: now + KICK_PUSH_SECONDS * 1000 }
+          pushAway(from, KICK_PUSH)
+          shake(0.8, 380)
           toast(`👟 ${who}님의 발차기에 날아갔어요!`)
+        } else if (hit.kind === 'ram') {
+          stun('down', RIDES.car.ram!.stun)
+          pushAway(from, RAM_PUSH)
+          shake(1, 450)
+          toast(`💥 ${who}님의 차에 치였어요!`)
         } else if (hit.kind === 'balloon') {
           stun('trapped', BALLOON_SECONDS)
           toast(`💧 ${who}님의 물풍선! 스페이스 연타로 탈출`)
@@ -229,13 +339,50 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     [],
   )
 
+  /**
+   * 링아웃 스핑크스: 구간에 들어오면 문제를 내고, 벽을 지날 때 고른 통로가 정답인지 본다.
+   * 오답 통로는 바닥이 열려 구간 처음으로 떨어지고 새 문제를 받는다.
+   */
+  const quizStep = (prev: { x: number; z: number }, p: THREE.Vector3, now: number) => {
+    if (!QUIZ) return
+    if (!run.quiz && p.z <= QUIZ.from && p.z > QUIZ.wallZ) {
+      run.quiz = pickQuiz()
+      audio.effect('pop')
+    }
+    if (!(prev.z > QUIZ.wallZ && p.z <= QUIZ.wallZ) || !run.quiz) return
+    const door = quizDoorAt(p.x)
+    // 통로가 아닌 곳으로 지나왔다면 유령이 벽을 뚫은 것이다. 그냥 통과한다.
+    if (door === null) {
+      run.quiz = null
+      return
+    }
+    if (door === run.quiz.correct) {
+      toast(`⭕ 정답! 「${run.quiz.options[door]}」 통과!`, 'good')
+      audio.effect('arrive')
+      run.quiz = null
+      return
+    }
+    const answer = run.quiz.options[run.quiz.correct]
+    run.quizWrong += 1
+    run.quiz = pickQuiz(run.quiz.question)
+    p.set(0, 0, QUIZ.from - 1.5)
+    jump.current.y = 0
+    jump.current.speed = 0
+    run.stunUntil = now + QUIZ_WRONG_STUN * 1000
+    immuneUntil.current = run.stunUntil + IMMUNE_MS
+    stunAnim.current = 'down'
+    velocity.current.set(0, 0)
+    run.rideUntil = 0
+    audio.effect('boom')
+    shake(0.7, 400)
+    toast(`❌ 땡! 바닥이 열렸어요. 정답은 「${answer}」 · 새 문제!`)
+  }
+
   /** 아이템 칸의 아이템을 쓴다. 쓸 대상이 없으면 아이템을 남겨 둔다. */
   const useItem = (p: THREE.Vector3, now: number) => {
     const kind = run.item
     if (!kind) return
-    const info = ITEM_INFO[kind]
     const others = rivals()
-    const keep = (message: string) => toast(`${info.icon} ${message}`, 'info')
     switch (kind) {
       case 'booster':
         run.boosterUntil = now + BOOSTER_SECONDS * 1000
@@ -258,18 +405,29 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         const inRange = others.filter((other) => distance(other) <= BALLOON_RANGE)
         const ahead = inRange.filter((other) => other.position.z < p.z + 1)
         const target = (ahead.length ? ahead : inRange).sort((a, b) => distance(a) - distance(b))[0]
-        if (!target) return keep('물풍선을 맞힐 사람이 근처에 없어요')
-        connection.send({ t: 'item', kind: 'balloon', target: target.id })
+        // 맞힐 사람이 없으면 앞쪽 허공으로 날린다.
+        connection.send(target ? { t: 'item', kind: 'balloon', target: target.id } : { t: 'item', kind: 'balloon' })
+        if (!target) toast('💧 허공에 물풍선을 날렸어요!', 'info')
         break
       }
       case 'ufo':
-        if (others.length === 0) return keep('혼자라서 우주선을 쓸 데가 없어요')
         connection.send({ t: 'item', kind: 'ufo' })
+        if (others.length === 0) toast('🛸 노릴 사람이 없어 모선이 앞길을 훑고 갔어요', 'info')
+        break
+      case 'zap':
+      case 'bomb':
+      case 'tornado':
+      case 'giant':
+      case 'ghost':
+      case 'snail':
+        connection.send({ t: 'item', kind })
+        if (kind === 'giant') toast('🍄 거인이 됐어요! 부딪히면 튕겨 나가요', 'good')
+        if (kind === 'ghost') toast('👻 유령이 됐어요! 장애물과 공격을 통과해요', 'good')
         break
       case 'warp': {
         const ahead = others.filter((other) => other.position.z < p.z).sort((a, b) => b.position.z - a.position.z)[0]
-        if (!ahead) return keep('앞에 아무도 없어요. 당신이 1등!')
-        connection.send({ t: 'item', kind: 'warp', target: ahead.id })
+        connection.send(ahead ? { t: 'item', kind: 'warp', target: ahead.id } : { t: 'item', kind: 'warp' })
+        if (!ahead) toast('🌀 앞에 아무도 없어 포털이 허공에 열렸어요', 'info')
         break
       }
     }
@@ -350,9 +508,12 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       // 따릉이: 서버가 내게 줬다고 알려 오면 탄다.
       if (run.pendingBike !== null && bikes[run.pendingBike] !== undefined) {
         if (bikes[run.pendingBike] === myId && !stunned) {
-          run.rideUntil = now + RIDE_SECONDS * 1000
+          const pending = run.pendingBike
+          run.rideKind = BIKES.find((bike) => bike.id === pending)?.kind ?? 'bike'
+          const ride = RIDES[run.rideKind]
+          run.rideUntil = now + ride.seconds * 1000
           audio.effect('go')
-          toast(`🚲 따릉이 출발! ${RIDE_SECONDS}초 동안 쌩쌩`, 'good')
+          toast(`${ride.icon} ${ride.name} 출발! ${ride.seconds}초 동안 쌩쌩${ride.ram ? ' · 사람을 치면 기절!' : ''}`, 'good')
         } else if (bikes[run.pendingBike] !== myId) {
           toast('앗, 다른 사람이 먼저 탔어요', 'info')
         }
@@ -362,7 +523,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       const riding = now < run.rideUntil
       if (wasRiding && !riding) {
         run.rideUntil = 0
-        toast('따릉이 반납! 다시 걸어요', 'info')
+        toast(`${RIDES[run.rideKind].name}에서 내렸어요. 다시 걸어요`, 'info')
       }
       run.nearBike = riding ? null : (BIKES.find((bike) => bikes[bike.id] === undefined && Math.hypot(bike.x - p.x, bike.z - p.z) < BIKE_REACH)?.id ?? null)
 
@@ -417,7 +578,11 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       if (puddle && !inPuddle.current) audio.effect('splash')
       inPuddle.current = puddle
       // 따릉이, 부스터, 알람 부스트는 겹치지 않고 가장 빠른 쪽을 쓴다. 따릉이는 웅덩이에서도 느려지지 않는다.
-      const factor = Math.max(riding ? RIDE_FACTOR : 1, now < run.boostUntil ? BOOST_FACTOR : 1, now < run.boosterUntil ? BOOSTER_FACTOR : 1)
+      const giant = myId !== null && connection.isGiant(myId)
+      const ghost = myId !== null && connection.isGhost(myId)
+      const factor =
+        Math.max(riding ? RIDES[run.rideKind].factor : 1, now < run.boostUntil ? BOOST_FACTOR : 1, now < run.boosterUntil ? BOOSTER_FACTOR : 1, giant ? GIANT_FACTOR : 1) *
+        (now < run.slowUntil ? SNAIL_FACTOR : 1)
       // 얼어붙은 웅덩이와 호수는 느려지는 대신 미끄러진다.
       const slowed = puddle && !icy && !riding && jump.current.y === 0
       const slippery = (special === 'ice' || (icy && puddle)) && jump.current.y === 0
@@ -426,6 +591,24 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       const blend = 1 - Math.exp(-delta * (slippery ? ICE_GRIP : 12))
       velocity.current.x += (move.x * speed - velocity.current.x) * blend
       velocity.current.y += (-move.y * speed - velocity.current.y) * blend
+      // 대왕 미끄럼틀: 위에서는 저절로 쭉 미끄러져 내려가고, 옆으로만 움직일 수 있다.
+      const sliding = onSlide(p.z) && !stunned
+      if (sliding) {
+        velocity.current.x += (move.x * SLIDE_STEER - velocity.current.x) * (1 - Math.exp(-delta * 8))
+        velocity.current.y += (-SLIDE_SPEED - velocity.current.y) * (1 - Math.exp(-delta * 6))
+        if (!run.sliding) {
+          audio.effect('ultimate')
+          shake(0.25, 300)
+          if (!slideTold.current) {
+            slideTold.current = true
+            toast('🛝 대왕 미끄럼틀! 슈우우웅~ 좌우로만 움직일 수 있어요', 'good')
+          }
+        }
+      } else if (run.sliding) {
+        audio.effect('boom')
+        shake(0.35, 250)
+      }
+      run.sliding = sliding
       p.x += velocity.current.x * delta
       p.z += velocity.current.y * delta
       if (now < knock.current.until) {
@@ -471,12 +654,18 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
           jump.current.count = 0
         }
       }
-      p.y = jump.current.y
+      // 계단과 미끄럼틀 위에서는 그 높이만큼 떠 있다.
+      p.y = groundAt(p.z) + jump.current.y
 
       if (!run.appSet && prev.z > -13.9 && p.z <= -13.9) toast('📱 먼저 책상 위 휴대폰으로 링아웃 목적지를 정해요', 'info')
       confine(p, prev, !run.appSet)
-      for (const prop of PROPS) pushOutOfCircle(p, prop)
-      for (const wall of subwayWalls(t)) pushOutOfBox(p, wall)
+      // 유령은 화분, 스크린도어, 스핑크스 벽을 그냥 통과한다.
+      if (!ghost) {
+        for (const prop of PROPS) pushOutOfCircle(p, prop)
+        for (const wall of subwayWalls(t)) pushOutOfBox(p, wall)
+        for (const wall of quizWalls()) pushOutOfBox(p, wall)
+      }
+      quizStep(prev, p, now)
       // 제설차는 벽처럼 밀고 지나간다.
       for (const plow of plowsAt(t)) {
         if (!circleHitsBox(p.x, p.z, BODY_RADIUS, plow)) continue
@@ -499,7 +688,44 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         run.rideUntil = 0
       }
 
-      if (!stunned && now >= immuneUntil.current) {
+      // 차를 타고 있으면 부딪힌 사람을 들이받는다. 맞았는지는 서버가 정해 알려 준다.
+      const ram = riding ? RIDES[run.rideKind].ram : null
+      // 거인과 부딪히면 튕겨 나간다. 거인끼리는 괜찮다.
+      for (const other of rivals()) {
+        const distance = Math.hypot(other.position.x - p.x, other.position.z - p.z)
+        if (ram && distance < ram.radius && now - (lastBump.current.get(other.id) ?? 0) > 1500) {
+          lastBump.current.set(other.id, now)
+          connection.send({ t: 'ram', target: other.id })
+        }
+        if (!giant && connection.isGiant(other.id) && distance < GIANT_BUMP && now - (lastBump.current.get(-other.id) ?? 0) > 1500) {
+          lastBump.current.set(-other.id, now)
+          if (areaStun('down', 1, `🍄 거인 ${nicknameOf(other.id)}님에게 튕겨 나갔어요!`)) pushAway(other.position, 5)
+        }
+      }
+
+      // 폭탄은 떨어진 뒤 터지고, 회오리는 앞으로 나아가며 닿는 사람을 휘감는다.
+      for (const area of areas.current) {
+        if (area.done) continue
+        const elapsed = (now - area.at) / 1000
+        if (area.kind === 'bomb') {
+          if (elapsed < BOMB_FUSE_SECONDS) continue
+          area.done = true
+          if (Math.hypot(p.x - area.x, p.z - area.z) < BOMB_RADIUS && areaStun('down', BOMB_STUN_SECONDS, `💣 ${nicknameOf(area.from)}님의 폭탄이 펑!`)) pushAway(area, 6)
+        } else {
+          if (elapsed > TORNADO_SECONDS) {
+            area.done = true
+            continue
+          }
+          const spot = tornadoAt(elapsed, area)
+          if (Math.hypot(p.x - spot.x, p.z - spot.z) < TORNADO_RADIUS) {
+            area.done = true
+            areaStun('ufo', TORNADO_STUN_SECONDS, `🌪️ ${nicknameOf(area.from)}님의 회오리에 휘말렸어요!`)
+          }
+        }
+      }
+      areas.current = areas.current.filter((area) => !area.done)
+
+      if (!stunned && !ghost && now >= immuneUntil.current) {
         const car = vehiclesAt(t).find((vehicle) => circleHitsBox(p.x, p.z, BODY_RADIUS, vehicle))
         const hurdle = HURDLE_ZS.find((z) => Math.abs(p.z - z) < HURDLE_HALF_DEPTH + BODY_RADIUS && p.y < HURDLE_HEIGHT)
         const moving = velocity.current.length() > 1
@@ -536,8 +762,9 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       if (now < run.stunUntil) anim = stunAnim.current
       else if (now < run.kickUntil) anim = 'kick'
       else if (now < run.punchUntil) anim = 'punch'
-      else if (now < run.rideUntil) anim = 'ride'
-      else if (p.y > 0) anim = 'jump'
+      else if (now < run.rideUntil) anim = run.rideKind === 'bike' ? 'ride' : run.rideKind
+      else if (run.sliding && jump.current.y === 0) anim = 'slide'
+      else if (jump.current.y > 0) anim = 'jump'
       else if (planar > 0.5) anim = 'walk'
       motion.current.speed = planar
 
@@ -569,6 +796,11 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     }
 
     motion.current.anim = anim
+    // 거인 버섯을 먹으면 몸이 커지고, 유령이면 하얀 천을 뒤집어쓴다.
+    const giantNow = myId !== null && connection.isGiant(myId)
+    scale.current += ((giantNow ? GIANT_SCALE : 1) - scale.current) * (1 - Math.exp(-delta * 6))
+    node.scale.setScalar(scale.current)
+    motion.current.ghost = myId !== null && connection.isGhost(myId)
     run.x = p.x
     run.z = p.z
     self.x = p.x
@@ -585,10 +817,27 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       const scale = portrait ? 1.35 : 1
       const forwardX = Math.sin(angle)
       const forwardZ = -Math.cos(angle)
-      cameraGoal.set(node.position.x - forwardX * CAMERA_DISTANCE * scale, CAMERA_HEIGHT * scale, node.position.z - forwardZ * CAMERA_DISTANCE * scale)
+      // 미끄럼틀에서는 카메라가 낮게 바짝 붙어 속도감이 난다.
+      const near = run.sliding ? 0.6 : 1
+      cameraGoal.set(
+        node.position.x - forwardX * CAMERA_DISTANCE * scale * near,
+        CAMERA_HEIGHT * scale * (run.sliding ? 0.55 : 1) + p.y * 0.6,
+        node.position.z - forwardZ * CAMERA_DISTANCE * scale * near,
+      )
       lookGoal.set(node.position.x + forwardX * CAMERA_LOOK, 1, node.position.z + forwardZ * CAMERA_LOOK)
       camera.position.lerp(cameraGoal, 1 - Math.exp(-delta * 5))
       camera.lookAt(lookGoal)
+    }
+    // 미끄럼틀을 타면 시야가 넓어지며 확 빨라 보인다.
+    const perspective = camera as THREE.PerspectiveCamera
+    const fov = run.sliding ? 78 : 50
+    if (Math.abs(perspective.fov - fov) > 0.1) {
+      perspective.fov += (fov - perspective.fov) * (1 - Math.exp(-delta * 6))
+      perspective.updateProjectionMatrix()
+    }
+    if (run.sliding) {
+      camera.position.x += (Math.random() - 0.5) * 0.06
+      camera.position.y += (Math.random() - 0.5) * 0.06
     }
     // 궁극기 연출 중에는 화면이 흔들린다. 끝날수록 약해진다.
     if (now < run.shakeUntil) {

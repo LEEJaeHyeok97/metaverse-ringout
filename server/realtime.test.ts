@@ -21,7 +21,7 @@ before(async () => {
     maxPlayers: 20,
     isOriginAllowed: () => true,
     gardenFile,
-    timing: { lobbyCountdownMs: 50, gameCountdownMs: 50, minFinishSeconds: 0.2, limitSeconds: 9 },
+    timing: { lobbyCountdownMs: 50, gameCountdownMs: 50, minFinishSeconds: 0.2, limitSeconds: 9, finishGraceMs: 1500 },
   })
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const address = server.address()
@@ -105,8 +105,13 @@ test('다섯 명이 빠른 참가로 모이면 자동으로 시작하고, 도착
     return client.next('finished')
   }
   await Promise.all([walk(clients[1], 0), walk(clients[3], 400)])
-  // 나머지는 제한 시간이 지나 결석으로 끝난다.
+  // 1등이 들어오면 남은 사람에게 마감 카운트다운을 알린다.
+  const closing = await clients[0].next('closing')
+  assert.equal(closing.endsIn, 1500)
+  // 나머지는 마감 시간 안에 못 들어와 결석으로 끝난다. 제한 시간(9초)까지 기다리지 않는다.
+  const startedWaiting = Date.now()
   const results = await clients[0].next('results')
+  assert.ok(Date.now() - startedWaiting < 1600)
   assert.equal(results.rows.length, 5)
   assert.deepEqual(
     results.rows.slice(0, 2).map((row) => row.nickname),
@@ -239,11 +244,18 @@ test('물풍선은 가까운 사람에게, 우주선은 1등에게, 귀가 포�
   const warp = await leader.next('trapped')
   assert.equal(warp.kind, 'warp')
 
-  // 앞서 있는 사람은 뒤에 있는 사람에게 귀가 포털을 못 쓴다.
+  // 앞서 있는 사람이 뒤에 있는 사람에게 쓴 귀가 포털은 맞지 않고 허공에 열린다.
   await sleep(1600)
   leader.send({ t: 'item', kind: 'warp', target: created.room!.members[0].id })
-  await sleep(100)
+  const missed = await host.next('fx', (m) => m.kind === 'warp')
+  assert.equal(missed.from, leaderId)
+  assert.ok(missed.z !== undefined && missed.x !== undefined)
   assert.equal(host.inbox.some((m) => m.t === 'trapped' && m.kind === 'warp' && m.to !== leaderId), false)
+
+  // 맞힐 사람을 고르지 않은 물풍선도 허공에 날아간다.
+  await sleep(1600)
+  leader.send({ t: 'item', kind: 'balloon' })
+  await host.next('fx', (m) => m.kind === 'balloon' && m.from === leaderId)
 
   host.send({ t: 'item', kind: 'banana' })
   const bananas = await leader.next('bananas')
@@ -324,4 +336,70 @@ test('발차기는 주먹보다 멀리 닿고, 주먹과 따로 쿨타임이 돈
   assert.equal(hit.kick, true)
   assert.equal(hit.to, bId)
   for (const client of [a, b]) client.socket.close()
+})
+
+test('차를 탄 사람만 가까운 사람을 들이받을 수 있고, 범위 아이템은 쓴 자리를 모두에게 알린다', async () => {
+  const driver = await connect('운전수')
+  driver.send({ t: 'create' })
+  const created = await driver.next('room', (m) => m.room !== null)
+  const walker = await connect('보행자')
+  walker.send({ t: 'join', code: created.room!.code })
+  await walker.next('room', (m) => m.room?.members.length === 2)
+  driver.send({ t: 'start' })
+  const [start] = await Promise.all([driver.next('start'), walker.next('start')])
+  await sleep(80)
+  const driverId = created.room!.members[0].id
+  const walkerId = driverId + 1
+  // 기본 맵이 아닐 수도 있으니 골목의 경차(모든 맵에서 2번)를 탄다.
+  const car = { id: 2, x: 9, z: -21 }
+  assert.ok(start.map)
+  // 차를 타기 전에는 들이받을 수 없다.
+  driver.send({ t: 'ram', target: walkerId })
+  await sleep(80)
+  assert.equal(walker.inbox.some((m) => m.t === 'punched'), false)
+
+  // 집을 나와 차 옆으로 걸어간다(빠르게 가면 서버가 받지 않으니 조금씩).
+  for (let i = 1; i <= 12; i++) {
+    const t = i / 12
+    driver.send({ t: 'move', x: 6.5 + (car.x - 6.5) * t, y: 0, z: -2 + (car.z + 1 - -2) * t, h: 0, a: 1 })
+    walker.send({ t: 'move', x: 6.5 + (car.x - 6.5) * t + 1, y: 0, z: -2 + (car.z + 1 - -2) * t, h: 0, a: 1 })
+    await sleep(120)
+  }
+  driver.send({ t: 'ride', bike: car.id })
+  await driver.next('bikes', (m) => m.taken[car.id] === driverId)
+  driver.send({ t: 'ram', target: walkerId })
+  const rammed = await walker.next('punched', (m) => m.ram === true)
+  assert.equal(rammed.from, driverId)
+
+  // 폭탄은 쓴 사람 앞에 떨어진 자리를 함께 보낸다.
+  driver.send({ t: 'item', kind: 'bomb' })
+  const bomb = await walker.next('fx', (m) => m.kind === 'bomb')
+  assert.equal(bomb.from, driverId)
+  assert.ok(bomb.z !== undefined && bomb.z < car.z)
+  driver.socket.close()
+  walker.socket.close()
+})
+
+test('광장 조각상은 가까이서 찬 사람만 깎고, 깨진 돌을 모두에게 알린다', async () => {
+  const [kicker, viewer] = await Promise.all(['조각가', '구경꾼2'].map(connect))
+  const first = await viewer.next('statue')
+  const before = first.removed.length
+  // 멀리서 차면 깎이지 않는다.
+  kicker.send({ t: 'move', x: 0, y: 0, z: 20, h: 0, a: 0 })
+  await sleep(50)
+  kicker.send({ t: 'carve' })
+  await sleep(100)
+  assert.equal(viewer.inbox.some((m) => m.t === 'statue' && m.chips), false)
+  // 조각상 앞에서 차면 돌이 깨진다.
+  kicker.send({ t: 'move', x: 0, y: 0, z: -2, h: 0, a: 0 })
+  await sleep(50)
+  kicker.send({ t: 'carve' })
+  const carved = await viewer.next('statue', (m) => m.chips !== undefined)
+  assert.equal(carved.chips!.length, 8)
+  assert.equal(carved.removed.length, before + 8)
+  // 쿨타임 안에 또 차면 무시한다.
+  kicker.send({ t: 'carve' })
+  await sleep(100)
+  assert.equal(viewer.inbox.some((m) => m.t === 'statue' && m.chips), false)
+  for (const client of [kicker, viewer]) client.socket.close()
 })

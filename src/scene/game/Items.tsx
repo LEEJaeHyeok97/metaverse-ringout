@@ -1,24 +1,24 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { BIKES, COFFEES, ITEM_BOX_XS, ITEM_RESPAWN_MS, ITEM_ROWS } from '../../game/course'
+import { BIKES, COFFEES, RIDES, ITEM_BOX_XS, ITEM_RESPAWN_MS, ITEM_ROWS } from '../../game/course'
 import { run } from '../../game/run'
 import { COLORS } from '../../lib/brand'
 import { useConnection } from '../../net/connection'
 import { Ink } from '../ink'
 import { Label } from '../Label'
-import { BikeModel } from '../StickFigure'
+import { RideModel } from '../Rides'
 import { OnCourse } from './onCourse'
 
-/** 길가에 세워진 따릉이. 누가 타고 가면 그 판에서는 사라진다. */
+/** 길가에 세워진 탈것. 누가 타고 가면 그 판에서는 사라진다. */
 export function ParkedBikes() {
   const { bikes } = useConnection()
   return (
     <>
       {BIKES.filter((bike) => bikes[bike.id] === undefined).map((bike) => (
         <OnCourse key={bike.id} x={bike.x} z={bike.z} rotation={Math.PI}>
-          <BikeModel />
-          <Label text="🚲 따릉이" position={[0, 1.8, 0]} size={0.32} background="#E3F5E9" />
+          <RideModel kind={bike.kind} />
+          <Label text={`${RIDES[bike.kind].icon} ${RIDES[bike.kind].name}`} position={[0, bike.kind === 'truck' ? 3 : 2, 0]} size={0.32} background={RIDES[bike.kind].ram ? '#FDE4D8' : '#E3F5E9'} />
         </OnCourse>
       ))}
     </>

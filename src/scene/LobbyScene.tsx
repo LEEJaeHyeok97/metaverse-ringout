@@ -4,9 +4,12 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { INTRO_BOARDS, PHONE_SCREEN } from '../data/ringout'
 import { audio } from '../lib/audio'
+import { shake } from '../game/run'
 import { useLogoImage } from '../ui/art/RingoutLogo'
 import { BRAND, COLORS, FONT } from '../lib/brand'
-import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH } from '../game/lobby'
+import { BOARD_SPOTS, gardenTile, gardenTileAt, INFO_SPOTS, LOBBY_HALF, LOBBY_OBSTACLES, MATCH_PAD, PHONE_SPOT, PLANT_REACH, STATUE } from '../game/lobby'
+import { CARVE_REACH } from '../game/statue'
+import { Statue } from './Statue'
 import { DOUBLE_JUMP_SPEED, GRAVITY, JUMP_SPEED, KICK_PUSH, KICK_PUSH_SECONDS, KICK_STUN_SECONDS, MAX_JUMPS, PUNCH_STUN_SECONDS, pushOutOfCircle } from '../game/course'
 import { nicknameOf, tryPunch } from './combat'
 import { PunchEffects } from './PunchEffects'
@@ -184,7 +187,7 @@ function MatchPad() {
 
 const TREES: [number, number, number][] = [
   [-24, 0, -22], [-15, 0, -26], [15, 0, -25], [24, 0, -20], [-26, 0, 2], [26, 0, 0],
-  [-25, 0, 24], [-3, 0, 28.5], [12, 0, 26], [25, 0, 22], [0, 0, -26],
+  [-25, 0, 24], [-3, 0, 28.5], [12, 0, 26], [25, 0, 22], [-6, 0, -28],
 ]
 
 type LobbyProps = {
@@ -249,20 +252,24 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
     () =>
       connection.onPunch((punch) => {
         const myId = connection.getState().myId
-        if (punch.from === myId) audio.effect('hit')
+        if (punch.from === myId) {
+          audio.effect('smack')
+          shake(punch.kind === 'kick' ? 0.4 : 0.25, 160)
+        }
         if (punch.to !== myId) return
+        shake(punch.kind === 'kick' ? 0.8 : 0.6, 350)
         const kicked = punch.kind === 'kick'
         stunUntil.current = performance.now() + (kicked ? KICK_STUN_SECONDS : PUNCH_STUN_SECONDS) * 1000
         velocity.current.set(0, 0)
-        audio.effect('hit')
+        audio.effect('smack')
         const node = group.current
         const from = connection.positions.get(punch.from)
-        if (kicked && node && from) {
-          // 찬 사람에게서 멀어지는 쪽으로 날아간다.
+        if (node && from) {
+          // 때린 사람에게서 멀어지는 쪽으로 밀려난다. 발차기는 멀리 날아간다.
           const dx = node.position.x - from.x
           const dz = node.position.z - from.z
           const length = Math.hypot(dx, dz) || 1
-          const speed = KICK_PUSH / KICK_PUSH_SECONDS
+          const speed = (kicked ? KICK_PUSH : 1.2) / KICK_PUSH_SECONDS
           knock.current = { x: (dx / length) * speed, z: (dz / length) * speed, until: performance.now() + KICK_PUSH_SECONDS * 1000 }
         }
         connection.bubbles.set(myId, { text: kicked ? `${nicknameOf(punch.from)}님에게 차였다!` : `${nicknameOf(punch.from)}님에게 맞았다!`, until: performance.now() + 2000 })
@@ -299,7 +306,11 @@ function LocalLobbyPlayer({ me, onPadChange, onNearInfo, onOpenInfo, onStandingT
     }
     if (input.kickCount !== lastKick.current) {
       lastKick.current = input.kickCount
-      if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y, true)) kickUntil.current = performance.now() + 400
+      if (!overlay.open && !stunned && tryPunch(node.position.x, node.position.z, node.rotation.y, true)) {
+        kickUntil.current = performance.now() + 400
+        // 조각상 가까이에서 차면 돌이 깨진다. 어느 돌이 깨질지는 서버가 정한다.
+        if (Math.hypot(node.position.x - STATUE.x, node.position.z - STATUE.z) < CARVE_REACH) connection.send({ t: 'carve' })
+      }
     }
 
     const near = nearestInfo(node.position.x, node.position.z)
@@ -436,9 +447,10 @@ export function LobbyScene({ me, players, onPadChange, onNearInfo, onOpenInfo, n
         <meshBasicMaterial map={grid} />
       </mesh>
       <FloorRing radius={LOBBY_HALF - 1} />
-      <FloorRing radius={9} position={[PHONE_SPOT.x, 0.02, PHONE_SPOT.z]} color={COLORS.pencil} width={0.05} />
-      <Label text={`${BRAND.name} 월드`} position={[0, 7.2, PHONE_SPOT.z - 1]} size={1.1} color={COLORS.accent} />
-      <Label text={BRAND.slogan} position={[0, 6.2, PHONE_SPOT.z - 1]} size={0.5} background={null} />
+      <FloorRing radius={9} position={[STATUE.x, 0.02, STATUE.z]} color={COLORS.pencil} width={0.05} />
+      <Statue />
+      <Label text={`${BRAND.name} 월드`} position={[0, 9.4, PHONE_SPOT.z - 1]} size={1.1} color={COLORS.accent} />
+      <Label text={BRAND.slogan} position={[0, 8.4, PHONE_SPOT.z - 1]} size={0.5} background={null} />
       <GiantPhone onOpen={() => onOpenInfo(INFO_SPOTS.length - 1)} />
       {nearInfo !== null && (
         <Label

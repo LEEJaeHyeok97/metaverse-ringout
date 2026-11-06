@@ -39,7 +39,7 @@ export function Specials() {
 // ---- 천둥 번개 사거리 ----
 
 /** 번개 한 줄기: 지그재그로 꺾인 굵은 선 */
-function Bolt() {
+export function Bolt() {
   const pieces = useMemo(() => {
     const points: [number, number][] = [
       [0, 14],

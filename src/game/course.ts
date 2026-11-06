@@ -59,11 +59,11 @@ export function halfWidthAt(z: number) {
  * 골목(출발)과 캠퍼스(도착) 사이는 장애물 구간 여섯 개로 이루어진다. 맵마다 구간 순서, 길이 휘는 모양, 날씨가 다르다.
  * 서버가 게임을 시작할 때 맵을 하나 골라 모두에게 알려 주고, 화면은 applyMap()으로 그 맵을 깐다.
  */
-export type SectionKind = 'road' | 'pigeons' | 'hurdles' | 'subway' | 'light' | 'scooter' | SpecialKind
+export type SectionKind = 'road' | 'pigeons' | 'hurdles' | 'subway' | 'light' | 'scooter' | 'quiz' | 'slide' | SpecialKind
 /** 맵마다 하나씩 있는 그 맵만의 구간. 판교는 비둘기 광장이 그 자리다. */
 export type SpecialKind = 'storm' | 'acorns' | 'ice'
 
-const SECTION_LENGTH: Record<SectionKind, number> = { road: 34, pigeons: 46, hurdles: 40, subway: 30, light: 40, scooter: 72, storm: 46, acorns: 46, ice: 46 }
+const SECTION_LENGTH: Record<SectionKind, number> = { road: 30, pigeons: 40, hurdles: 34, subway: 26, light: 36, scooter: 36, quiz: 20, slide: 40, storm: 40, acorns: 40, ice: 40 }
 const SECTION_NAME: Record<SectionKind, string> = {
   road: '아침 찻길',
   pigeons: '비둘기 광장',
@@ -71,6 +71,8 @@ const SECTION_NAME: Record<SectionKind, string> = {
   subway: '지하철 스크린도어',
   light: '무궁화 신호등',
   scooter: '킥보드 언덕',
+  quiz: '링아웃 스핑크스',
+  slide: '대왕 미끄럼틀',
   storm: '천둥 번개 사거리',
   acorns: '데굴데굴 도토리 언덕',
   ice: '꽁꽁 언 호수공원',
@@ -120,7 +122,7 @@ export const MAPS: CourseMap[] = [
     emoji: '☀️',
     intro: '맑은 아침, 늘 다니던 그 길',
     alley: '우리 동네 골목',
-    sections: ['road', 'pigeons', 'hurdles', 'subway', 'light', 'scooter'],
+    sections: ['road', 'pigeons', 'hurdles', 'slide', 'subway', 'light', 'scooter', 'quiz'],
     bends: [
       { from: 40, to: 74, curvature: 1 / 52 },
       { from: 110, to: 150, curvature: -1 / 48 },
@@ -137,7 +139,7 @@ export const MAPS: CourseMap[] = [
     emoji: '☔',
     intro: '⚡ 번개 그림자를 피하고, 💨 돌풍에 밀리지 마세요',
     alley: '빗물 고인 골목',
-    sections: ['subway', 'road', 'scooter', 'storm', 'light', 'hurdles'],
+    sections: ['subway', 'road', 'scooter', 'slide', 'storm', 'light', 'hurdles', 'quiz'],
     names: { road: '물 튀기는 찻길' },
     bends: [
       { from: 50, to: 110, curvature: 1 / 70 },
@@ -153,7 +155,7 @@ export const MAPS: CourseMap[] = [
     emoji: '🍁',
     intro: '🌰 굴러오는 도토리는 2단 점프로, 🍂 낙엽 더미는 폴짝!',
     alley: '낙엽 쌓인 골목',
-    sections: ['hurdles', 'acorns', 'light', 'road', 'subway', 'scooter'],
+    sections: ['hurdles', 'acorns', 'light', 'slide', 'road', 'subway', 'scooter', 'quiz'],
     names: { hurdles: '쓰러진 통나무', scooter: '은행나무 킥보드길' },
     bends: [
       { from: 42, to: 70, curvature: 1 / 40 },
@@ -173,7 +175,7 @@ export const MAPS: CourseMap[] = [
     emoji: '❄️',
     intro: '🧊 얼음 위는 쭈욱 미끄러지고, 🚜 제설차가 밀어내요',
     alley: '눈 쌓인 골목',
-    sections: ['light', 'scooter', 'road', 'hurdles', 'ice', 'subway'],
+    sections: ['light', 'scooter', 'road', 'slide', 'hurdles', 'ice', 'subway', 'quiz'],
     names: { hurdles: '눈더미 허들', road: '제설 안 된 찻길' },
     bends: [
       { from: 45, to: 95, curvature: -1 / 60 },
@@ -269,6 +271,8 @@ export const WAKE_DECAY_PER_SECOND = 2
 export const COUNTDOWN_MS = 4000
 /** 이 시간이 지나면 도착하지 못한 사람은 결석 처리하고 끝낸다. */
 export const GAME_LIMIT_SECONDS = 160
+/** 1등이 도착하면 남은 사람은 이 시간 안에 들어와야 한다. 못 들어오면 게임이 끝난다. */
+export const FINISH_GRACE_SECONDS = 10
 /** 게임 1초가 시계로 20초. 08:25에 알람이 울리고 09:00(105초)가 넘으면 지각이다. */
 export const CLOCK_START_MINUTES = 8 * 60 + 25
 export const CLOCK_SCALE = 20
@@ -276,8 +280,19 @@ export const LATE_SECONDS = ((9 * 60 - CLOCK_START_MINUTES) * 60) / CLOCK_SCALE
 
 // ---- 아이템과 기물 ----
 /** 따릉이를 타면 이만큼 빨라진다. 알람 부스트와 겹치지 않고 더 빠른 쪽을 쓴다. */
-export const RIDE_FACTOR = 1.7
-export const RIDE_SECONDS = 7
+/** 길가에 세워진 탈것. 탈것마다 빠르기, 탈 수 있는 시간, 들이받을 때의 위력이 다르다. */
+export type RideKind = 'bike' | 'scooter' | 'car' | 'sports' | 'truck'
+export const RIDES: Record<RideKind, { icon: string; name: string; factor: number; seconds: number; ram: { radius: number; stun: number } | null }> = {
+  bike: { icon: '🚲', name: '따릉이', factor: 1.7, seconds: 7, ram: null },
+  scooter: { icon: '🛵', name: '배달 스쿠터', factor: 1.85, seconds: 6, ram: { radius: 1.3, stun: 0.8 } },
+  car: { icon: '🚗', name: '경차', factor: 1.6, seconds: 8, ram: { radius: 1.8, stun: 1.3 } },
+  sports: { icon: '🏎️', name: '스포츠카', factor: 1.95, seconds: 5, ram: { radius: 1.7, stun: 1.1 } },
+  truck: { icon: '🚚', name: '트럭', factor: 1.4, seconds: 9, ram: { radius: 2.4, stun: 1.7 } },
+}
+/** 가장 빠른 탈것. 서버가 너무 빠른 이동을 거를 때 쓴다. */
+export const MAX_RIDE_FACTOR = Math.max(...Object.values(RIDES).map((ride) => ride.factor))
+/** 들이받힌 사람이 날아가는 거리 */
+export const RAM_PUSH = 5.5
 export const BIKE_REACH = 2.5
 export const COFFEE_SECONDS = 3
 export const COFFEE_REACH = 1.2
@@ -303,16 +318,22 @@ export const ITEM_BOX_REACH = 1.2
 export const ITEM_RESPAWN_MS = 4000
 export const ITEM_COOLDOWN_MS = 1500
 
-export const ITEM_KINDS = ['booster', 'shield', 'banana', 'balloon', 'ufo', 'warp'] as const
+export const ITEM_KINDS = ['booster', 'shield', 'banana', 'balloon', 'ufo', 'warp', 'zap', 'bomb', 'tornado', 'giant', 'ghost', 'snail'] as const
 export type ItemKind = (typeof ITEM_KINDS)[number]
 
 export const ITEM_INFO: Record<ItemKind, { icon: string; name: string; help: string }> = {
   booster: { icon: '🚀', name: '부스터', help: '2.5초 동안 아주 빨라져요' },
   shield: { icon: '🛡️', name: '방패', help: '6초 동안 공격 한 번을 막아요' },
   banana: { icon: '🍌', name: '바나나', help: '뒤에 떨어뜨려요. 밟으면 미끄러져요' },
-  balloon: { icon: '💧', name: '물풍선', help: '앞사람을 물방울에 가둬요' },
-  ufo: { icon: '🛸', name: '우주선', help: '1등을 붙잡아 공중에 띄워요' },
-  warp: { icon: '🌀', name: '귀가 포털', help: '바로 앞 사람을 집 앞으로 돌려보내요' },
+  balloon: { icon: '💧', name: '물풍선', help: '앞사람을 물방울에 가둬요. 없으면 앞으로 던져요' },
+  ufo: { icon: '🛸', name: '우주선', help: '1등을 붙잡아 공중에 띄워요. 혼자면 앞길을 훑어요' },
+  zap: { icon: '⚡', name: '번개', help: '다른 사람 모두에게 벼락을 내려 잠깐 기절시켜요' },
+  bomb: { icon: '💣', name: '폭탄', help: '앞으로 던지면 터져서 근처 사람을 날려 버려요' },
+  tornado: { icon: '🌪️', name: '회오리', help: '앞으로 회오리를 날려 닿는 사람을 휘감아요' },
+  giant: { icon: '🍄', name: '거인 버섯', help: '5초 동안 거인이 되어 빨라지고, 부딪힌 사람을 튕겨내요' },
+  ghost: { icon: '👻', name: '유령', help: '5초 동안 유령이 되어 장애물과 공격을 모두 통과해요' },
+  snail: { icon: '🐌', name: '달팽이 저주', help: '나보다 앞선 사람 모두를 3초 동안 느리게 해요' },
+  warp: { icon: '🌀', name: '귀가 포털', help: '바로 앞 사람을 집 앞으로 돌려보내요. 없으면 허공에 열려요' },
 }
 
 export const BOOSTER_FACTOR = 1.75
@@ -325,6 +346,27 @@ export const BANANA_RADIUS = 0.75
 export const BANANA_SLIP_SECONDS = 1.1
 /** 귀가 포털에 맞으면 돌아가는 자리(집 현관 바로 앞) */
 export const WARP_Z = HOUSE_FRONT_Z - 2
+export const ZAP_STUN_SECONDS = 1
+export const BOMB_FUSE_SECONDS = 0.7
+export const BOMB_AHEAD = 9
+export const BOMB_RADIUS = 4.5
+export const BOMB_STUN_SECONDS = 1.3
+export const TORNADO_SECONDS = 2.8
+export const TORNADO_RADIUS = 2
+export const TORNADO_STUN_SECONDS = 1.2
+export const GIANT_SECONDS = 5
+export const GIANT_FACTOR = 1.3
+export const GIANT_SCALE = 2.2
+/** 거인과 부딪히는 거리 */
+export const GIANT_BUMP = 1.9
+export const GHOST_SECONDS = 5
+export const SNAIL_SECONDS = 3
+export const SNAIL_FACTOR = 0.5
+
+/** 회오리가 출발하고 elapsed초 뒤에 있는 자리(코스 좌표). 앞으로 구불구불 나아간다. */
+export function tornadoAt(elapsed: number, origin: { x: number; z: number }) {
+  return { x: origin.x + Math.sin(elapsed * 3.2) * 5, z: origin.z - 2 - elapsed * 15 }
+}
 
 /**
  * 순위에 따라 아이템이 나올 확률. 앞서갈수록 방어 아이템이, 뒤처질수록 공격 아이템이 잘 나온다.
@@ -339,6 +381,12 @@ export function rollItem(rank: number, total: number, random = Math.random()): I
     balloon: 1.5 + behind * 2,
     ufo: behind * 2.5,
     warp: behind >= 0.99 && total > 1 ? 0.6 : 0,
+    zap: behind * 1.2,
+    bomb: 1.2 + behind,
+    tornado: 1 + behind,
+    giant: 1.4,
+    ghost: 1.4 - behind * 0.6,
+    snail: behind * 1.5,
   }
   const sum = Object.values(weights).reduce((a, b) => a + b, 0)
   let pick = random * sum
@@ -544,7 +592,7 @@ export type CourseLayout = {
   pigeonFrom: number
   subwayZ: number
   lightZone: { from: number; to: number }
-  bikes: { id: number; x: number; z: number }[]
+  bikes: { id: number; x: number; z: number; kind: RideKind }[]
   coffees: { id: number; x: number; z: number }[]
   itemRows: number[]
   /** 이 맵만의 구간. 판교는 없다(비둘기 광장이 그 자리). */
@@ -552,6 +600,10 @@ export type CourseLayout = {
   hasPigeons: boolean
   /** 밟으면 높이 튀어 오르는 낙엽 더미 */
   leafPiles: Circle[]
+  /** 링아웃 스핑크스: 퀴즈를 맞힌 통로로만 지나갈 수 있는 벽 */
+  quiz: { from: number; wallZ: number; to: number } | null
+  /** 대왕 미끄럼틀: from에서 계단을 올라 top부터 to까지 미끄러져 내려간다. */
+  slide: { from: number; top: number; to: number; end: number } | null
 }
 
 /** 출발 골목. 모든 맵에 같다. */
@@ -574,10 +626,11 @@ const ALLEY = {
     { x: 2, z: -60, r: 0.8, kind: 'bin' },
   ] as Prop[],
   bikes: [
-    { x: -10, z: -20 },
-    { x: 9, z: -21 },
-    { x: 22, z: -19 },
-  ],
+    { x: -10, z: -20, kind: 'bike' },
+    { x: 9, z: -21, kind: 'car' },
+    { x: 22, z: -19, kind: 'scooter' },
+    { x: -22, z: -21, kind: 'sports' },
+  ] as { x: number; z: number; kind: RideKind }[],
   coffees: [
     { x: -9, z: -46 },
     { x: 10, z: -64 },
@@ -595,7 +648,7 @@ const SECTION_CONTENT: Record<
     props?: (Spot & { r: number; kind: Prop['kind'] })[]
     hurdles?: number[]
     lanes?: (Omit<VehicleLane, 'z'> & { d: number })[]
-    bikes?: Spot[]
+    bikes?: (Spot & { kind: RideKind })[]
     coffees?: Spot[]
     itemRows?: number[]
     leafPiles?: (Spot & { r: number })[]
@@ -611,14 +664,14 @@ const SECTION_CONTENT: Record<
   pigeons: {
     puddles: [{ x: 0, d: 18, r: 2.4 }],
     bikes: [
-      { x: -8, d: 4 },
-      { x: 8, d: 5 },
+      { x: -8, d: 4, kind: 'bike' },
+      { x: 8, d: 5, kind: 'car' },
     ],
     coffees: [
       { x: -2, d: 22 },
-      { x: 11, d: 38 },
+      { x: 11, d: 35 },
     ],
-    itemRows: [44],
+    itemRows: [38],
   },
   hurdles: {
     hurdles: [6, 14, 22, 30],
@@ -627,76 +680,79 @@ const SECTION_CONTENT: Record<
       { x: 6, d: 10, r: 0.6, kind: 'cone' },
       { x: -2, d: 18, r: 0.6, kind: 'cone' },
       { x: 10, d: 26, r: 0.6, kind: 'cone' },
-      { x: -10, d: 34, r: 0.6, kind: 'cone' },
+      { x: -10, d: 32, r: 0.6, kind: 'cone' },
     ],
   },
   subway: {
     coffees: [{ x: -11, d: 2 }],
     bikes: [
-      { x: -9, d: 28 },
-      { x: 9, d: 28 },
+      { x: -9, d: 23, kind: 'truck' },
+      { x: 9, d: 23, kind: 'sports' },
     ],
   },
   light: { itemRows: [12] },
   storm: {
     bikes: [
-      { x: -8, d: 4 },
-      { x: 8, d: 5 },
+      { x: -8, d: 4, kind: 'bike' },
+      { x: 8, d: 5, kind: 'car' },
     ],
     coffees: [
       { x: -2, d: 22 },
-      { x: 11, d: 38 },
+      { x: 11, d: 35 },
     ],
-    itemRows: [44],
+    itemRows: [38],
   },
   acorns: {
     leafPiles: [
       { x: -6, d: 9, r: 1.7 },
       { x: 7, d: 17, r: 1.7 },
       { x: -1, d: 27, r: 1.7 },
-      { x: 9, d: 35, r: 1.7 },
-      { x: -9, d: 39, r: 1.7 },
+      { x: 9, d: 31, r: 1.7 },
+      { x: -9, d: 37, r: 1.7 },
     ],
     bikes: [
-      { x: -8, d: 4 },
-      { x: 8, d: 5 },
+      { x: -8, d: 4, kind: 'bike' },
+      { x: 8, d: 5, kind: 'car' },
     ],
     coffees: [
       { x: -2, d: 22 },
-      { x: 11, d: 38 },
+      { x: 11, d: 35 },
     ],
-    itemRows: [44],
+    itemRows: [38],
   },
   ice: {
     bikes: [
-      { x: -8, d: 4 },
-      { x: 8, d: 5 },
+      { x: -8, d: 4, kind: 'bike' },
+      { x: 8, d: 5, kind: 'car' },
     ],
     coffees: [
       { x: -2, d: 22 },
-      { x: 11, d: 38 },
+      { x: 11, d: 35 },
     ],
-    itemRows: [44],
+    itemRows: [38],
   },
   scooter: {
     lanes: [
-      { kind: 'scooter', d: 12, speed: 18, offsets: [0, 24], hx: 0.9, hz: 0.5 },
-      { kind: 'scooter', d: 28, speed: -16, offsets: [10, 34], hx: 0.9, hz: 0.5 },
-      { kind: 'scooter', d: 46, speed: 20, offsets: [4, 28], hx: 0.9, hz: 0.5 },
+      { kind: 'scooter', d: 10, speed: 18, offsets: [0, 24], hx: 0.9, hz: 0.5 },
+      { kind: 'scooter', d: 21, speed: -16, offsets: [10, 34], hx: 0.9, hz: 0.5 },
+      { kind: 'scooter', d: 31, speed: 20, offsets: [4, 28], hx: 0.9, hz: 0.5 },
     ],
     props: [
       { x: -9, d: 4, r: 1.4, kind: 'bush' },
-      { x: 5, d: 20, r: 1.4, kind: 'bush' },
-      { x: -3, d: 38, r: 1.4, kind: 'bush' },
-      { x: 9, d: 54, r: 1.4, kind: 'bush' },
+      { x: 5, d: 15.5, r: 1.4, kind: 'bush' },
+      { x: 4, d: 26, r: 1.4, kind: 'bush' },
     ],
-    puddles: [{ x: -8, d: 36, r: 2.6 }],
+    puddles: [{ x: -8, d: 26, r: 2.4 }],
+    bikes: [{ x: -11, d: 15.5, kind: 'scooter' }],
     coffees: [
       { x: 6, d: 6 },
-      { x: -8, d: 54 },
+      { x: -8, d: 34 },
     ],
-    itemRows: [62],
+    itemRows: [35],
   },
+  quiz: {},
+  slide: {},
+
 }
 
 /** 맵의 구간 순서대로 장애물을 늘어놓는다. */
@@ -716,6 +772,8 @@ export function buildLayout(map: CourseMap): CourseLayout {
     special: null,
     hasPigeons: false,
     leafPiles: [],
+    quiz: null,
+    slide: null,
   }
   const bikes = [...ALLEY.bikes]
   const coffees = [...ALLEY.coffees]
@@ -728,7 +786,7 @@ export function buildLayout(map: CourseMap): CourseLayout {
     for (const { x, d, r, kind: prop } of content.props ?? []) layout.props.push({ x, z: z(d), r, kind: prop })
     for (const d of content.hurdles ?? []) layout.hurdleZs.push(z(d))
     for (const { d, ...lane } of content.lanes ?? []) layout.vehicleLanes.push({ ...lane, z: z(d) })
-    for (const { x, d } of content.bikes ?? []) bikes.push({ x, z: z(d) })
+    for (const { x, d, kind: ride } of content.bikes ?? []) bikes.push({ x, z: z(d), kind: ride })
     for (const { x, d } of content.coffees ?? []) coffees.push({ x, z: z(d) })
     for (const d of content.itemRows ?? []) layout.itemRows.push(z(d))
     for (const { x, d, r } of content.leafPiles ?? []) layout.leafPiles.push({ x, z: z(d), r })
@@ -736,9 +794,11 @@ export function buildLayout(map: CourseMap): CourseLayout {
       layout.pigeonFrom = z(4)
       layout.hasPigeons = true
     }
+    if (kind === 'slide') layout.slide = { from: z(0), top: z(SLIDE_TOP_D), to: z(SLIDE_BOTTOM_D), end: z(SECTION_LENGTH.slide) }
+    if (kind === 'quiz') layout.quiz = { from: z(0), wallZ: z(QUIZ_WALL_D), to: z(SECTION_LENGTH.quiz) }
     if (kind === 'storm' || kind === 'acorns' || kind === 'ice') layout.special = { kind, from: z(0), to: z(SECTION_LENGTH[kind]) }
     if (kind === 'subway') layout.subwayZ = z(12)
-    if (kind === 'light') layout.lightZone = { from: z(4), to: z(36) }
+    if (kind === 'light') layout.lightZone = { from: z(4), to: z(32) }
     start += SECTION_LENGTH[kind]
   }
   layout.zones.push({ name: '우테코 캠퍼스', from: -(start), to: FINISH_Z })
@@ -769,6 +829,8 @@ let HAS_PIGEONS = true
 /** 지금 맵만의 구간. 없으면 null */
 export let SPECIAL: CourseLayout['special'] = null
 export let LEAF_PILES: Circle[] = []
+export let QUIZ: CourseLayout['quiz'] = null
+export let SLIDE: CourseLayout['slide'] = null
 export let ZONES: Zone[] = []
 export let PUDDLES: Circle[] = []
 export let PROPS: Prop[] = []
@@ -791,6 +853,8 @@ export function applyMap(mapId: string | undefined) {
   HAS_PIGEONS = layout.hasPigeons
   SPECIAL = layout.special
   LEAF_PILES = layout.leafPiles
+  QUIZ = layout.quiz
+  SLIDE = layout.slide
   ZONES = layout.zones
   PUDDLES = layout.puddles
   PROPS = layout.props
@@ -804,7 +868,6 @@ export function applyMap(mapId: string | undefined) {
   ITEM_ROWS = layout.itemRows
 }
 
-applyMap(DEFAULT_MAP_ID)
 
 // ---- 맵만의 구간 ----
 /** 지금 이 거리(z)가 맵만의 구간 안이면 그 종류 */
@@ -908,3 +971,60 @@ export function plowsAt(seconds: number): (Box & { dir: 1 | -1 })[] {
   const from = SPECIAL.from
   return PLOW_LANES.map((lane) => ({ x: wrap(lane.offset + lane.speed * Math.max(0, seconds)), z: from - lane.d, hx: PLOW.hx, hz: PLOW.hz, dir: lane.speed > 0 ? 1 : -1 }))
 }
+
+// ---- 링아웃 스핑크스 ----
+/** 구간 시작에서 벽까지. 그 앞에서 문제를 읽고 통로를 고른다. */
+const QUIZ_WALL_D = 14
+export const QUIZ_DOOR_XS = [-8, 0, 8]
+export const QUIZ_DOOR_HALF = 2.2
+export const QUIZ_WALL_HALF_DEPTH = 0.5
+/** 오답 통로에 들어가면 떨어졌다가 구간 처음으로 돌아온다. */
+export const QUIZ_WRONG_STUN = 1.2
+
+/** 통로 사이를 막는 벽. 통로는 늘 열려 있고, 맞았는지는 지나갈 때 정한다. */
+export function quizWalls(): Box[] {
+  if (!QUIZ) return []
+  const walls: Box[] = []
+  let left = -YARD_HALF_W
+  for (const doorX of QUIZ_DOOR_XS) {
+    const right = doorX - QUIZ_DOOR_HALF
+    walls.push({ x: (left + right) / 2, z: QUIZ.wallZ, hx: (right - left) / 2, hz: QUIZ_WALL_HALF_DEPTH })
+    left = doorX + QUIZ_DOOR_HALF
+  }
+  walls.push({ x: (left + YARD_HALF_W) / 2, z: QUIZ.wallZ, hx: (YARD_HALF_W - left) / 2, hz: QUIZ_WALL_HALF_DEPTH })
+  return walls
+}
+
+/** 이 x가 몇 번째 통로인지. 통로 밖이면 null */
+export function quizDoorAt(x: number) {
+  const index = QUIZ_DOOR_XS.findIndex((doorX) => Math.abs(x - doorX) <= QUIZ_DOOR_HALF)
+  return index >= 0 ? index : null
+}
+
+// ---- 대왕 미끄럼틀 ----
+/** 구간 시작에서 계단 꼭대기까지, 그리고 미끄럼틀이 끝나는 곳까지 */
+const SLIDE_TOP_D = 7
+const SLIDE_BOTTOM_D = 36
+/** 미끄럼틀 꼭대기 높이. 서버가 받는 높이(3) 안에 둔다. */
+export const SLIDE_HEIGHT = 3
+/** 미끄러지는 빠르기. 서버의 속도 검사(MAX_SPEED)보다 조금 느리다. */
+export const SLIDE_SPEED = 18
+/** 미끄럼틀 위에서 옆으로 움직이는 빠르기 */
+export const SLIDE_STEER = 7
+
+/** 이 거리(z)의 땅 높이. 계단은 올라가고, 미끄럼틀은 꼭대기에서 바닥까지 내려간다. */
+export function groundAt(z: number) {
+  if (!SLIDE || z > SLIDE.from || z < SLIDE.to) return 0
+  if (z > SLIDE.top) return ((SLIDE.from - z) / (SLIDE.from - SLIDE.top)) * SLIDE_HEIGHT
+  const t = (SLIDE.top - z) / (SLIDE.top - SLIDE.to)
+  // 처음엔 가파르게, 끝에선 완만하게 내려온다.
+  return SLIDE_HEIGHT * (1 - t) * (1 - t * 0.35)
+}
+
+/** 미끄럼틀을 타고 있는 구간인지(계단 말고) */
+export function onSlide(z: number) {
+  return SLIDE !== null && z <= SLIDE.top && z > SLIDE.to
+}
+
+// 모든 규칙을 읽은 뒤 기본 맵을 깐다.
+applyMap(DEFAULT_MAP_ID)

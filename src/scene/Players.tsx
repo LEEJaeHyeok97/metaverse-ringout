@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { connection } from '../net/connection'
 import { animFrom, type PlayerInfo } from '../net/protocol'
-import { courseFrame, type Frame } from '../game/course'
+import { courseFrame, GIANT_SCALE, type Frame } from '../game/course'
 import { Label } from './Label'
 import { StickFigure, type Motion } from './StickFigure'
 
@@ -67,6 +67,10 @@ function RemoteFigure({ player, curved }: { player: PlayerInfo; curved: boolean 
     turn = Math.atan2(Math.sin(turn), Math.cos(turn))
     node.rotation.y += turn * blend
     motion.current.anim = animFrom(target.a)
+    // 거인 버섯을 먹은 사람은 커지고, 유령은 하얀 천을 쓴다.
+    const size = connection.isGiant(player.id) ? GIANT_SCALE : 1
+    node.scale.setScalar(node.scale.x + (size - node.scale.x) * blend * 0.5)
+    motion.current.ghost = connection.isGhost(player.id)
     motion.current.speed = delta > 0 ? Math.hypot(node.position.x - before.x, node.position.z - before.z) / delta : 0
   })
 
