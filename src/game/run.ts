@@ -32,6 +32,14 @@ export const run = {
   slowUntil: 0,
   /** 미끄럼틀을 타는 중 */
   sliding: false,
+  /** 대시 발판을 밟아 빨라진 동안 */
+  dashUntil: 0,
+  /** 1등에게 많이 뒤처져 따라잡기 부스트를 받는 중 */
+  catchup: false,
+  /** 지금 내 순위(도착한 사람 포함). 모르면 0 */
+  rank: 0,
+  /** 지름길 골목을 지나는 중이면 나올 자리와 들어간 시각 */
+  shortcut: null as { x: number; z: number; at: number; name: string } | null,
   /** 링아웃 스핑크스가 지금 나에게 낸 문제. 구간에 들어가면 정한다. */
   quiz: null as ShownQuiz | null,
   /** 오답 통로로 떨어진 횟수 */
@@ -78,6 +86,10 @@ export function resetRun(startAt: number, lane: number) {
   run.rideKind = 'bike'
   run.slowUntil = 0
   run.sliding = false
+  run.shortcut = null
+  run.dashUntil = 0
+  run.catchup = false
+  run.rank = 0
   run.quiz = null
   run.quizWrong = 0
   run.nearBike = null
@@ -113,7 +125,7 @@ export function toast(text: string, tone: Toast['tone'] = 'bad') {
 
 // 개발 서버에서만 브라우저 자동 점검이 진행 상태를 읽을 수 있게 열어 둔다.
 // 브라우저 자동 점검이 지금 맵의 장애물 자리를 읽을 수 있게 한다.
-if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds, course: () => ({ map: course.activeMap.id, light: course.LIGHT_ZONE, hurdles: course.HURDLE_ZS, special: course.SPECIAL }) }
+if (import.meta.env.DEV) (window as unknown as { __ringout: unknown }).__ringout = { run, gameSeconds, course: () => ({ map: course.activeMap.id, light: course.LIGHT_ZONE, hurdles: course.HURDLE_ZS, special: course.SPECIAL, shortcuts: course.SHORTCUTS, pads: course.PADS }) }
 
 /** 링아웃 기능을 설명하는 가이드 카드를 띄운다. 한 판에 같은 가이드는 한 번만 보여 준다. */
 export function showGuide(id: GuideId) {

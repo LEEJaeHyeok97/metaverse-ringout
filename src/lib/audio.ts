@@ -28,7 +28,7 @@ function frequency(note: number) {
   return 440 * 2 ** ((note - 69) / 12)
 }
 
-export type EffectName = 'wake' | 'hit' | 'stumble' | 'whistle' | 'splash' | 'jump' | 'arrive' | 'late' | 'tick' | 'go' | 'pop' | 'ultimate' | 'boom' | 'smack' | 'gunfire' | 'spotted' | 'cleared'
+export type EffectName = 'wake' | 'hit' | 'stumble' | 'whistle' | 'splash' | 'jump' | 'arrive' | 'late' | 'tick' | 'go' | 'pop' | 'ultimate' | 'boom' | 'smack'
 
 /**
  * 음원 파일 없이 브라우저에서 바로 만드는 알람과 효과음. 소리는 사용자가 누른 뒤에만 시작할 수 있다.
@@ -173,36 +173,11 @@ export function createAudio() {
           tone('sawtooth', 160, now, 0.18, 0.22, 45)
           tone('triangle', 2400, now, 0.03, 0.08, 600)
           break
-        case 'gunfire':
-          // 사방에서 다다다닥: 짧은 총소리를 겹겹이 빠르게 쏜다.
-          for (let i = 0; i < 14; i++) {
-            const at = now + i * 0.055 + Math.random() * 0.02
-            tone('square', 300 + Math.random() * 200, at, 0.05, 0.16, 60)
-            tone('sawtooth', 1800, at, 0.02, 0.05, 400)
-          }
-          tone('sawtooth', 110, now + 0.75, 0.5, 0.2, 35)
-          break
-        case 'spotted':
-          // 술래가 휙 돌아볼 때: 낮게 쿵 하고 높은 경고음
-          tone('sawtooth', 90, now, 0.35, 0.18, 50)
-          tone('square', 1200, now + 0.05, 0.12, 0.07)
-          tone('square', 900, now + 0.2, 0.18, 0.07)
-          break
-        case 'cleared':
-          notes([72, 79, 84, 88, 91, 96], 0.07, 0.25, 0.1)
-          tone('sawtooth', 200, now, 0.5, 0.06, 1600)
-          break
         case 'boom':
           tone('sawtooth', 120, now, 0.6, 0.22, 35)
           tone('triangle', 70, now, 0.7, 0.2, 30)
           break
       }
-    },
-    /** 무궁화 꽃이 피었습니다 한 글자. 글자마다 음이 달라 노래처럼 들린다. */
-    syllable(index: number) {
-      if (!context) return
-      const melody = [67, 67, 69, 67, 64, 67, 67, 69, 67, 72]
-      tone('triangle', frequency(melody[index % melody.length]), context.currentTime, 0.16, 0.12)
     },
     isMuted: () => muted,
     setMuted(next: boolean) {

@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
+  CATCHUP_FACTOR,
+  CATCHUP_GAP,
+  DASH_FACTOR,
+  DASH_SECONDS,
+  PAD_JUMP_FORWARD,
+  PAD_JUMP_SPEED,
+  PAD_RADIUS,
+  PADS,
+  SHORTCUT_REACH,
+  SHORTCUT_TRAVEL_MS,
+  SHORTCUTS,
+  shortcutDoorX,
+  shortcutState,
   BALLOON_RANGE,
   BALLOON_SECONDS,
   BANANA_RADIUS,
@@ -339,6 +352,104 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
     [],
   )
 
+  /** 바닥 발판: 대시 발판은 쌩 빨라지고, 점프 발판은 높이 튀어 앞으로 날아간다. */
+  const lastPad = useRef({ index: -1, at: 0 })
+  const padStep = (p: THREE.Vector3, now: number, stunned: boolean) => {
+    if (stunned || run.shortcut || jump.current.y > 0.3) return
+    const index = PADS.findIndex((pad) => Math.hypot(pad.x - p.x, pad.z - p.z) < PAD_RADIUS)
+    if (index < 0 || (index === lastPad.current.index && now - lastPad.current.at < 2000)) return
+    lastPad.current = { index, at: now }
+    if (PADS[index].kind === 'dash') {
+      run.dashUntil = now + DASH_SECONDS * 1000
+      audio.effect('go')
+      shake(0.2, 200)
+      toast('💨 대시 발판! 쌩~', 'good')
+    } else {
+      jump.current.speed = PAD_JUMP_SPEED
+      jump.current.count = MAX_JUMPS
+      const air = (2 * PAD_JUMP_SPEED) / GRAVITY
+      knock.current = { x: 0, z: -PAD_JUMP_FORWARD, until: now + air * 1000 }
+      audio.effect('ultimate')
+      shake(0.3, 250)
+      toast('🦘 점프 발판! 날아올라~', 'good')
+    }
+  }
+
+  /**
+   * 순위가 바뀌면 바로 알려 주고, 1등에게 많이 뒤처지면 따라잡기 부스트를 준다.
+   * 도착한 사람은 앞에 있는 것으로 센다.
+   */
+  const rankTold = useRef({ rank: 0, at: 0 })
+  const rankStep = (p: THREE.Vector3, now: number) => {
+    const others = rivals()
+    const finished = connection.getState().match?.finishes.length ?? 0
+    const ahead = others.filter((other) => other.position.z < p.z)
+    const rank = finished + ahead.length + 1
+    const leaderZ = finished > 0 ? FINISH_Z : Math.min(p.z, ...others.map((other) => other.position.z))
+    const catchup = others.length + finished > 0 && p.z - leaderZ > CATCHUP_GAP
+    if (catchup && !run.catchup) toast('🔥 따라잡기 부스트! 조금 빨라져요', 'good')
+    run.catchup = catchup
+    run.rank = rank
+    // 집과 골목에서는 다들 엎치락뒤치락하니 큰길에 나와서부터 알린다.
+    if (p.z > -20 || run.phase !== 'running') {
+      rankTold.current = { rank, at: now }
+      return
+    }
+    if (rankTold.current.rank === 0) rankTold.current = { rank, at: now }
+    if (rank === rankTold.current.rank || now - rankTold.current.at < 1500) return
+    const passed = rank < rankTold.current.rank
+    rankTold.current = { rank, at: now }
+    if (passed) {
+      toast(rank === 1 ? '👑 1등으로 올라섰어요!' : `🔥 역전! ${rank}등으로 올라섰어요`, 'good')
+      audio.effect('pop')
+    } else {
+      const by = others.find((other) => other.position.z < p.z && other.position.z > p.z - 6)
+      toast(by ? `😱 ${nicknameOf(by.id)}님에게 추월당했어요! (${rank}등)` : `😱 ${rank}등으로 밀려났어요`)
+    }
+  }
+
+  /**
+   * 지름길 골목: 열린 문 앞에 가면 골목으로 쏙 들어가 잠깐 뒤 앞쪽 문으로 나온다.
+   * 닫힌 문 앞에서는 언제 열리는지 알려 준다.
+   */
+  const shortcutTold = useRef(new Set<number>())
+  const shortcutStep = (p: THREE.Vector3, now: number, t: number, stunned: boolean) => {
+    if (run.shortcut) {
+      velocity.current.set(0, 0)
+      if (now - run.shortcut.at < SHORTCUT_TRAVEL_MS) {
+        p.set(run.shortcut.x, p.y, p.z)
+        return
+      }
+      const skipped = Math.round(p.z - run.shortcut.z)
+      p.set(run.shortcut.x * 0.88, 0, run.shortcut.z)
+      jump.current.y = 0
+      jump.current.speed = 0
+      audio.effect('pop')
+      shake(0.3, 250)
+      toast(`🏃 ${run.shortcut.name} 통과! ${skipped}m 앞질렀어요`, 'good')
+      run.shortcut = null
+      return
+    }
+    if (stunned) return
+    for (const shortcut of SHORTCUTS) {
+      const doorX = shortcutDoorX(shortcut)
+      if (Math.abs(p.z - shortcut.from) > SHORTCUT_REACH || Math.abs(p.x - doorX) > SHORTCUT_REACH) continue
+      const door = shortcutState(shortcut, t)
+      if (!door.open) {
+        if (!shortcutTold.current.has(shortcut.id)) {
+          shortcutTold.current.add(shortcut.id)
+          toast(`🚪 ${shortcut.name} 문이 닫혀 있어요. ${Math.ceil(door.left)}초 뒤에 열려요`, 'info')
+        }
+        continue
+      }
+      run.shortcut = { x: doorX, z: shortcut.to, at: now, name: shortcut.name }
+      run.rideUntil = 0
+      audio.effect('whistle')
+      toast(`🚪 ${shortcut.name}에 쏙! 골목을 지나는 중…`, 'good')
+      return
+    }
+  }
+
   /**
    * 링아웃 스핑크스: 구간에 들어오면 문제를 내고, 벽을 지날 때 고른 통로가 정답인지 본다.
    * 오답 통로는 바닥이 열려 구간 처음으로 떨어지고 새 문제를 받는다.
@@ -581,12 +692,12 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       const giant = myId !== null && connection.isGiant(myId)
       const ghost = myId !== null && connection.isGhost(myId)
       const factor =
-        Math.max(riding ? RIDES[run.rideKind].factor : 1, now < run.boostUntil ? BOOST_FACTOR : 1, now < run.boosterUntil ? BOOSTER_FACTOR : 1, giant ? GIANT_FACTOR : 1) *
+        Math.max(riding ? RIDES[run.rideKind].factor : 1, now < run.dashUntil ? DASH_FACTOR : 1, run.catchup ? CATCHUP_FACTOR : 1, now < run.boostUntil ? BOOST_FACTOR : 1, now < run.boosterUntil ? BOOSTER_FACTOR : 1, giant ? GIANT_FACTOR : 1) *
         (now < run.slowUntil ? SNAIL_FACTOR : 1)
       // 얼어붙은 웅덩이와 호수는 느려지는 대신 미끄러진다.
       const slowed = puddle && !icy && !riding && jump.current.y === 0
       const slippery = (special === 'ice' || (icy && puddle)) && jump.current.y === 0
-      const speed = stunned || overlay.open ? 0 : WALK_SPEED * factor * (slowed ? PUDDLE_FACTOR : 1)
+      const speed = stunned || overlay.open || run.shortcut ? 0 : WALK_SPEED * factor * (slowed ? PUDDLE_FACTOR : 1)
       const move = moveVector()
       const blend = 1 - Math.exp(-delta * (slippery ? ICE_GRIP : 12))
       velocity.current.x += (move.x * speed - velocity.current.x) * blend
@@ -666,6 +777,9 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
         for (const wall of quizWalls()) pushOutOfBox(p, wall)
       }
       quizStep(prev, p, now)
+      shortcutStep(p, now, t, stunned)
+      padStep(p, now, stunned)
+      rankStep(p, now)
       // 제설차는 벽처럼 밀고 지나간다.
       for (const plow of plowsAt(t)) {
         if (!circleHitsBox(p.x, p.z, BODY_RADIUS, plow)) continue

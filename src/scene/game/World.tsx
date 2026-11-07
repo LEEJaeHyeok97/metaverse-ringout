@@ -38,6 +38,8 @@ import { OnCourse, RoadSurface } from './onCourse'
 import { Specials } from './Specials'
 import { Sphinx } from './Sphinx'
 import { Slide } from './Slide'
+import { Shortcuts } from './Shortcuts'
+import { Pads } from './Pads'
 
 const WALL_HEIGHT = 2
 const WALL = 0.25
@@ -320,6 +322,8 @@ export function World({ owners }: { owners: Map<number, { nickname: string; colo
       <Specials />
       <Sphinx />
       <Slide />
+      <Shortcuts />
+      <Pads />
       <OnCourse z={SUBWAY_Z}>
         <SubwayWall />
       </OnCourse>

@@ -604,6 +604,54 @@ export type CourseLayout = {
   quiz: { from: number; wallZ: number; to: number } | null
   /** 대왕 미끄럼틀: from에서 계단을 올라 top부터 to까지 미끄러져 내려간다. */
   slide: { from: number; top: number; to: number; end: number } | null
+  /** 지름길 골목: 길가 문으로 들어가면 건물 뒤 골목을 지나 앞쪽 문으로 나온다. */
+  shortcuts: Shortcut[]
+  /** 바닥 발판: dash는 밟으면 쌩 빨라지고, jump는 높이 튀어 앞으로 날아간다. */
+  pads: Pad[]
+}
+
+export type Pad = { x: number; z: number; kind: 'dash' | 'jump' }
+/** 발판 반지름 */
+export const PAD_RADIUS = 1.5
+/** 대시 발판: 이만큼 빨라진다. 서버의 속도 검사보다 느리다. */
+export const DASH_FACTOR = 1.9
+export const DASH_SECONDS = 1.3
+/** 점프 발판: 위로 이만큼, 앞으로 이만큼 날아간다. */
+export const PAD_JUMP_SPEED = 12
+export const PAD_JUMP_FORWARD = 13
+/** 발판을 둘 구간. 벽이 있는 지하철, 미끄럼틀, 스핑크스 구간에는 두지 않는다. */
+const PAD_SECTIONS: SectionKind[] = ['road', 'pigeons', 'hurdles', 'light', 'scooter', 'storm', 'acorns', 'ice']
+const PAD_XS = [-7, 0, 7]
+
+/** 꼴찌가 1등보다 이만큼 넘게 뒤처지면 따라잡기 부스트를 받는다. */
+export const CATCHUP_GAP = 30
+export const CATCHUP_FACTOR = 1.2
+
+/** 지름길 골목. from 문으로 들어가 to 문으로 나온다. side는 길의 왼쪽(-1)/오른쪽(1) */
+export type Shortcut = { id: number; side: 1 | -1; from: number; to: number; name: string }
+/** 이 구간들만 지름길로 건너뛸 수 있다. 미끄럼틀과 스핑크스는 꼭 지나야 한다. */
+const SHORTCUT_SECTIONS: SectionKind[] = ['hurdles', 'light', 'subway', 'pigeons', 'storm', 'acorns', 'ice']
+const SHORTCUT_NAMES = ['🐈 고양이 골목', '🍜 분식집 뒷골목', '🧱 담벼락 틈새']
+/** 한 맵에 지름길 골목 수 */
+const SHORTCUTS_PER_MAP = 2
+/** 문 앞 이만큼 안에 들어가면 골목으로 들어간다. */
+export const SHORTCUT_REACH = 1.7
+/** 골목을 지나는 데 걸리는 시간 */
+export const SHORTCUT_TRAVEL_MS = 1200
+/** 문은 SHORTCUT_CYCLE초마다 SHORTCUT_OPEN초 동안 열린다. 지름길마다 여는 때가 다르다. */
+export const SHORTCUT_CYCLE = 12
+export const SHORTCUT_OPEN = 5
+
+/** 지름길 문이 서 있는 x */
+export function shortcutDoorX(shortcut: Shortcut) {
+  return shortcut.side * (STREET_HALF_W - 0.6)
+}
+
+/** 이 게임 시각에 문이 열려 있는지, 그리고 다음에 바뀌기까지 남은 초 */
+export function shortcutState(shortcut: Shortcut, seconds: number) {
+  const local = (((seconds + shortcut.id * 5) % SHORTCUT_CYCLE) + SHORTCUT_CYCLE) % SHORTCUT_CYCLE
+  const open = local < SHORTCUT_OPEN
+  return { open, left: open ? SHORTCUT_OPEN - local : SHORTCUT_CYCLE - local }
 }
 
 /** 출발 골목. 모든 맵에 같다. */
@@ -774,6 +822,8 @@ export function buildLayout(map: CourseMap): CourseLayout {
     leafPiles: [],
     quiz: null,
     slide: null,
+    shortcuts: [],
+    pads: [],
   }
   const bikes = [...ALLEY.bikes]
   const coffees = [...ALLEY.coffees]
@@ -799,6 +849,17 @@ export function buildLayout(map: CourseMap): CourseLayout {
     if (kind === 'storm' || kind === 'acorns' || kind === 'ice') layout.special = { kind, from: z(0), to: z(SECTION_LENGTH[kind]) }
     if (kind === 'subway') layout.subwayZ = z(12)
     if (kind === 'light') layout.lightZone = { from: z(4), to: z(32) }
+    if (PAD_SECTIONS.includes(kind)) {
+      const index = map.sections.indexOf(kind)
+      const length = SECTION_LENGTH[kind]
+      layout.pads.push({ kind: 'dash', x: PAD_XS[index % 3], z: z(Math.round(length * 0.3)) })
+      layout.pads.push({ kind: index % 2 ? 'jump' : 'dash', x: PAD_XS[(index + 1) % 3], z: z(Math.round(length * 0.65)) })
+      if (kind === 'road' || kind === 'scooter') layout.pads.push({ kind: 'jump', x: PAD_XS[(index + 2) % 3], z: z(Math.round(length * 0.85)) })
+    }
+    if (SHORTCUT_SECTIONS.includes(kind) && layout.shortcuts.length < SHORTCUTS_PER_MAP) {
+      const index = layout.shortcuts.length
+      layout.shortcuts.push({ id: index + 1, side: index % 2 ? 1 : -1, from: z(2), to: z(SECTION_LENGTH[kind] - 2), name: SHORTCUT_NAMES[(map.sections.indexOf(kind) + index) % SHORTCUT_NAMES.length] })
+    }
     start += SECTION_LENGTH[kind]
   }
   layout.zones.push({ name: '우테코 캠퍼스', from: -(start), to: FINISH_Z })
@@ -842,6 +903,8 @@ export let LIGHT_ZONE = { from: 0, to: 0 }
 export let BIKES: CourseLayout['bikes'] = []
 export let COFFEES: CourseLayout['coffees'] = []
 export let ITEM_ROWS: number[] = []
+export let SHORTCUTS: Shortcut[] = []
+export let PADS: Pad[] = []
 
 /** 이 맵으로 코스를 바꾼다. 게임 화면을 그리기 전에 부른다. */
 export function applyMap(mapId: string | undefined) {
@@ -866,6 +929,8 @@ export function applyMap(mapId: string | undefined) {
   BIKES = layout.bikes
   COFFEES = layout.coffees
   ITEM_ROWS = layout.itemRows
+  SHORTCUTS = layout.shortcuts
+  PADS = layout.pads
 }
 
 

@@ -1,5 +1,5 @@
 import { TREE_ARRIVALS } from '../data/garden'
-import { GAME_TIPS } from '../data/ringout'
+import { GAME_TIPS, RINGOUT_FACTS } from '../data/ringout'
 import { activeMap, BIKES, gustAt, QUIZ, RIDES, specialAt, ALARM_PERIOD, bedSpot, clockText, FINISH_Z, GAME_LIMIT_SECONDS, isRinging, ITEM_INFO, LATE_SECONDS, lightAt, LIGHT_ZONE, WAKE_PRESSES, zoneAt } from '../game/course'
 import { gameSeconds, run, showGuide, toast } from '../game/run'
 import { BRAND } from '../lib/brand'
@@ -146,6 +146,30 @@ function Progress({ entrants, myId }: { entrants: PlayerInfo[]; myId: number | n
   )
 }
 
+const FACT_SECONDS = 9
+
+/** 화면 아래 가운데에 링아웃 소개를 크게 띄운다. 몇 초마다 다음 이야기로 넘어간다. */
+function RingoutInfo({ t }: { t: number }) {
+  const index = Math.floor((t + 10) / FACT_SECONDS) % RINGOUT_FACTS.length
+  const fact = RINGOUT_FACTS[Math.max(0, index)]
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-1/2 w-[max(340px,min(620px,calc(100vw-42rem)))] -translate-x-1/2 max-sm:top-[8.5rem] max-sm:bottom-auto max-sm:w-[calc(100%-2rem)]">
+      <div key={index} className="sketch pop-in flex items-center gap-3 border-accent bg-white/95 px-4 py-2 max-sm:gap-2 max-sm:px-3 max-sm:py-1">
+        <RingoutLogo className="size-11 shrink-0 max-sm:size-8" />
+        <div className="min-w-0">
+          <p className="text-sm font-bold tracking-wider text-accent">
+            링아웃 알아보기 {index + 1}/{RINGOUT_FACTS.length}
+          </p>
+          <p className="text-2xl leading-tight font-bold max-sm:text-lg">
+            {fact.icon} {fact.title}
+          </p>
+          <p className="text-lg leading-snug max-sm:text-sm">{fact.text}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CenterMessage({ t, myRank }: { t: number; myRank: number | null }) {
   if (t < 0) {
     return (
@@ -268,6 +292,8 @@ function ItemStatus() {
       )}
       {myId !== null && connection.isGiant(myId) && <p className="sketch bg-[#FFE0DC] px-4 py-1 text-2xl font-bold">🍄 거인! 부딪히면 튕겨내요</p>}
       {myId !== null && connection.isGhost(myId) && <p className="sketch bg-[#F3EFFF] px-4 py-1 text-2xl font-bold">👻 유령! 무엇이든 통과</p>}
+      {now < run.dashUntil && <p className="sketch bg-[#FFF6C9] px-4 py-1 text-2xl font-bold">💨 대시! 쌩쌩</p>}
+      {run.catchup && <p className="sketch bg-[#FFE0DC] px-4 py-1 text-xl font-bold">🔥 따라잡기 부스트 중</p>}
       {now < run.slowUntil && <p className="sketch bg-[#E3F5E9] px-4 py-1 text-2xl font-bold">🐌 달팽이 저주… 느릿느릿 {Math.ceil((run.slowUntil - now) / 1000)}초</p>}
       <p className="rounded-full bg-white/80 px-3 text-base text-pencil max-sm:hidden">WASD 이동 · 스페이스 점프(2단)/타기 · E 아이템 · F 때리기 · G 발차기</p>
     </div>
@@ -368,7 +394,6 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
       {run.sliding && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="speed-lines absolute inset-[-20%] rotate-90 opacity-40" />
-          <p className="pop-in absolute top-[30%] w-full text-center text-6xl font-bold text-white [-webkit-text-stroke:2px_#1A1A1A] max-sm:text-4xl">슈우우우웅~!!</p>
         </div>
       )}
       <SkillCutIn />
@@ -400,6 +425,11 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
           </button>
           <Progress entrants={entrants} myId={state.myId} />
           {t > 0 && run.phase !== 'finished' && <p className="sketch px-2 text-base">남은 시간 {left}초</p>}
+          {run.phase === 'running' && run.rank > 0 && entrants.length > 1 && (
+            <p key={run.rank} className="sketch pop-in px-3 text-2xl font-bold">
+              {run.rank === 1 ? '👑 ' : ''}지금 {run.rank}등
+            </p>
+          )}
         </div>
       </div>
       <p className={`sketch mx-auto mt-2 hidden w-fit px-3 text-3xl font-bold tabular-nums max-sm:block ${late ? 'text-accent' : ''}`}>{clockText(t)}</p>
@@ -420,9 +450,10 @@ export function GameHud({ state, match, entrants }: { state: ConnectionState; ma
 
       <div className="absolute bottom-4 left-4 flex flex-col items-start gap-2 max-sm:hidden">
         <ChatBox chats={state.chats} enabled={state.status === 'online'} />
-        {run.phase === 'running' && <p className="sketch max-w-sm px-3 py-1 text-base max-sm:hidden">💡 {tip}</p>}
+        {run.phase === 'running' && <p className="sketch max-w-72 px-3 py-1 text-base max-sm:hidden">💡 {tip}</p>}
       </div>
 
+      {!state.results && !run.appOpen && <RingoutInfo t={t} />}
       {run.phase === 'running' && <ItemStatus />}
       {run.phase === 'running' && !run.appOpen && (
         <div className="pointer-events-auto">

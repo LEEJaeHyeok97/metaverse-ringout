@@ -17,6 +17,7 @@ import {
   BOMB_AHEAD,
   GHOST_SECONDS,
   layoutOf,
+  shortcutDoorX,
   randomMapId,
   BIKE_REACH,
   PUNCH_RANGE,
@@ -46,7 +47,6 @@ import {
   type SnapshotEntry,
 } from '../src/net/protocol.ts'
 import { GARDEN_TILES, gardenTile, LOBBY_HALF, MAX_GARDEN_TREES, PLANT_REACH } from '../src/game/lobby.ts'
-import { beatsOf, inRedLightField, makeRound, RL_FIELD, RL_GRACE_MS, RL_OUT_MS, type RedLightPhase, type RedLightRound } from '../src/game/redlight.ts'
 
 const SNAPSHOT_INTERVAL_MS = 100
 const HEARTBEAT_INTERVAL_MS = 30_000
@@ -84,7 +84,7 @@ export type RealtimeOptions = {
   /** 함께 정원을 저장할 파일. 없으면 서버가 꺼질 때 정원도 사라진다. */
   gardenFile?: string
   /** 테스트에서 기다리는 시간을 줄일 때만 바꾼다. */
-  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number; /** 무궁화 놀이터 박자를 이만큼 줄이거나 늘린다(시험용) */ redLightScale?: number }
+  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number }
 }
 
 type Player = {
@@ -205,86 +205,12 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const minFinishSeconds = timing.minFinishSeconds ?? MIN_FINISH_SECONDS
   const limitSeconds = timing.limitSeconds ?? GAME_LIMIT_SECONDS
   const finishGraceMs = timing.finishGraceMs ?? FINISH_GRACE_SECONDS * 1000
-  const redLightScale = timing.redLightScale ?? 1
 
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
   const players = new Map<WebSocket, Player>()
   const rooms = new Map<string, Room>()
   let nextId = 1
   let lobbyRosterDirty = false
-  const sendLobby = (message: ServerMessage) => {
-    for (const player of lobbyPlayers()) send(player, message)
-  }
-
-  /**
-   * 무궁화 놀이터의 술래. 서버가 박자를 정해 모두 같은 순간에 외치고 돌아본다.
-   * 한 판은 외치기(chant) → 돌아보기(look) [→ 잠깐 등 돌리기(turn) → 다시 돌아보기 …] 순서다.
-   */
-  const redLight = {
-    round: null as RedLightRound | null,
-    queue: [] as { phase: RedLightPhase; ms: number; beats?: number[] }[],
-    phase: 'chant' as RedLightPhase,
-    beats: undefined as number[] | undefined,
-    startedAt: 0,
-    ms: 0,
-    lastLookEnd: 0,
-  }
-  const outUntil = new Map<number, number>()
-  const winUntil = new Map<number, number>()
-  const redLightMessage = (): ServerMessage => ({
-    t: 'redLight',
-    phase: redLight.phase,
-    ms: redLight.ms,
-    elapsed: Math.min(redLight.ms, Date.now() - redLight.startedAt),
-    pattern: redLight.round?.pattern ?? '',
-    beats: redLight.beats,
-  })
-  const nextRedLightPhase = (now: number) => {
-    if (redLight.phase === 'look') redLight.lastLookEnd = now
-    if (redLight.queue.length === 0) {
-      const round = makeRound(redLight.round?.pattern ?? null)
-      redLight.round = round
-      const scale = (ms: number) => Math.max(1, Math.round(ms * redLightScale))
-      const { beats, chantMs } = beatsOf(round.steps.map(scale))
-      redLight.queue.push({ phase: 'chant', ms: chantMs, beats })
-      round.looks.forEach((look, index) => {
-        if (index > 0) redLight.queue.push({ phase: 'turn', ms: scale(round.gapMs) })
-        redLight.queue.push({ phase: 'look', ms: scale(look) })
-      })
-    }
-    const next = redLight.queue.shift()!
-    redLight.phase = next.phase
-    redLight.ms = next.ms
-    redLight.beats = next.beats
-    redLight.startedAt = now
-    sendLobby(redLightMessage())
-  }
-  const stepRedLight = () => {
-    const now = Date.now()
-    if (!redLight.round || now - redLight.startedAt >= redLight.ms) nextRedLightPhase(now)
-  }
-
-  /** 돌아본 동안 움직였다는 신고. 정말 돌아보는 중이고 놀이터 안에 있을 때만 쏜다. */
-  const handleRedLightOut = (player: Player) => {
-    const now = Date.now()
-    if (player.inGame || now < (outUntil.get(player.id) ?? 0)) return
-    const looking = redLight.phase === 'look' && now - redLight.startedAt >= RL_GRACE_MS * redLightScale - 200
-    // 돌아보기가 막 끝났을 때 늦게 도착한 신고도 받아 준다.
-    const justEnded = redLight.phase !== 'look' && now - redLight.lastLookEnd < 400 * Math.min(1, redLightScale)
-    if (!looking && !justEnded) return
-    if (!inRedLightField(player.x, player.z, 1.5)) return
-    outUntil.set(player.id, now + RL_OUT_MS + 500)
-    sendLobby({ t: 'rlShot', id: player.id })
-  }
-
-  const handleRedLightWin = (player: Player) => {
-    const now = Date.now()
-    if (player.inGame || now < (winUntil.get(player.id) ?? 0) || now < (outUntil.get(player.id) ?? 0)) return
-    if (player.z > RL_FIELD.finishZ + 1.5 || Math.abs(player.x) > RL_FIELD.half + 1.5) return
-    winUntil.set(player.id, now + 4000)
-    sendLobby({ t: 'rlWin', id: player.id })
-  }
-
   /** 함께 정원. 오래 심은 나무가 앞에 온다. */
   let trees = loadTrees(gardenFile)
 
@@ -457,7 +383,11 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       if (now < room.startAt || room.finished.has(player.id)) return
       const dt = Math.min((now - player.lastMoveAt) / 1000, 1)
       const progress = player.z - z
-      if (progress > MAX_SPEED * dt + PROGRESS_SLACK) return
+      // 지름길 골목을 지나면 한 번에 앞쪽 문으로 나온다.
+      const viaShortcut = layoutOf(room.mapId).shortcuts.some(
+        (shortcut) => Math.abs(player.z - shortcut.from) < 4 && Math.abs(z - shortcut.to) < 3 && Math.abs(x - shortcutDoorX(shortcut)) < 4,
+      )
+      if (progress > MAX_SPEED * dt + PROGRESS_SLACK && !viaShortcut) return
       x = Math.min(Math.max(x, -STREET_HALF_W - 2), STREET_HALF_W + 2)
       z = Math.min(Math.max(z, WORLD_MIN_Z), HOUSE_BACK_Z)
     } else {
@@ -665,7 +595,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         player.ready = true
         send(player, { t: 'welcome', id: player.id })
         send(player, { t: 'garden', trees })
-        send(player, redLightMessage())
       }
       lobbyRosterDirty = true
       if (player.room) broadcastRoom(player.room)
@@ -730,12 +659,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         return
       case 'slip':
         handleSlip(player, message.banana)
-        return
-      case 'rlOut':
-        handleRedLightOut(player)
-        return
-      case 'rlWin':
-        handleRedLightWin(player)
         return
       case 'plant':
         handlePlant(player, message.tile)
@@ -810,7 +733,6 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
 
   const snapshotTimer = setInterval(() => {
     const lobby = lobbyPlayers()
-    stepRedLight()
     if (lobbyRosterDirty) {
       lobbyRosterDirty = false
       const list = lobby.map(info)

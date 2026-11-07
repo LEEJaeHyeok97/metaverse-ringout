@@ -21,7 +21,7 @@ before(async () => {
     maxPlayers: 20,
     isOriginAllowed: () => true,
     gardenFile,
-    timing: { lobbyCountdownMs: 50, gameCountdownMs: 50, minFinishSeconds: 0.2, limitSeconds: 9, finishGraceMs: 1500, redLightScale: 0.25 },
+    timing: { lobbyCountdownMs: 50, gameCountdownMs: 50, minFinishSeconds: 0.2, limitSeconds: 9, finishGraceMs: 1500 },
   })
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const address = server.address()
@@ -378,39 +378,4 @@ test('차를 탄 사람만 가까운 사람을 들이받을 수 있고, 범위 �
   assert.ok(bomb.z !== undefined && bomb.z < car.z)
   driver.socket.close()
   walker.socket.close()
-})
-
-test('무궁화 놀이터: 술래가 돌아본 동안 놀이터 안에서 움직인 사람만 쏘고, 도착선을 넘으면 통과를 알린다', async () => {
-  const [runner, viewer] = await Promise.all(['무궁화', '구경꾼2'].map(connect))
-  // 놀이터 밖에서 걸렸다고 해도 쏘지 않는다.
-  runner.send({ t: 'move', x: 20, y: 0, z: 20, h: 0, a: 0 })
-  viewer.inbox.length = 0
-  await viewer.next('redLight', (m) => m.phase === 'look')
-  await sleep(120)
-  runner.send({ t: 'rlOut' })
-  await sleep(100)
-  assert.equal(viewer.inbox.some((m) => m.t === 'rlShot'), false)
-  // 외치는 동안에는 움직여도 된다.
-  runner.send({ t: 'move', x: 0, y: 0, z: 5, h: 0, a: 1 })
-  viewer.inbox.length = 0
-  const chant = await viewer.next('redLight', (m) => m.phase === 'chant')
-  assert.ok(chant.beats && chant.beats.length === 10)
-  await sleep(150)
-  runner.send({ t: 'rlOut' })
-  await sleep(20)
-  assert.equal(viewer.inbox.some((m) => m.t === 'rlShot'), false)
-  // 돌아본 뒤 놀이터 안에서 움직이면 쏜다.
-  viewer.inbox.length = 0
-  await viewer.next('redLight', (m) => m.phase === 'look')
-  await sleep(10)
-  runner.send({ t: 'rlOut' })
-  const shot = await viewer.next('rlShot')
-  // 도착선 앞까지 가면 통과
-  await sleep(2800)
-  runner.send({ t: 'move', x: 0, y: 0, z: -11.5, h: 0, a: 1 })
-  await sleep(30)
-  runner.send({ t: 'rlWin' })
-  const win = await viewer.next('rlWin')
-  assert.equal(win.id, shot.id)
-  for (const client of [runner, viewer]) client.socket.close()
 })
