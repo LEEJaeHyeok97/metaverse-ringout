@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { BRAND } from '../lib/brand'
 import { mapById, MAX_ROOM_PLAYERS } from '../game/course'
-import { KART_LAPS, KART_TRACK_NAME, MODE_INFO } from '../game/kart'
+import { KART_TRACKS, kartTrackById, MODE_INFO } from '../game/kart'
 import { GAME_MODES, type GameMode } from '../net/protocol'
 import { INTRO_BOARDS } from '../data/ringout'
 import { plantableCount, useGarden } from '../data/garden'
@@ -36,7 +36,7 @@ function Countdown({ departAt, mapId, mode }: { departAt: number; mapId: string 
     return (
       <div className="pop-in flex flex-col items-center gap-1 text-center">
         <p className="sketch bg-[#FFF6C9] px-3 py-1 text-xl">
-          🏎️ <b>{KART_TRACK_NAME}</b> {KART_LAPS}바퀴
+          🎲 이번 트랙: <b>{kartTrackById(mapId ?? undefined).emoji} {kartTrackById(mapId ?? undefined).name}</b>
         </p>
         <p className="text-2xl font-bold text-accent">{left}초 뒤 출발선에 서요!</p>
       </div>
@@ -81,7 +81,7 @@ function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => 
       {!room ? (
         <>
           <p className="text-lg leading-snug">
-            최대 {MAX_ROOM_PLAYERS}명이 함께 달려요. <b>출근 레이스</b>는 {BRAND.name} 알람에 일어나 캠퍼스까지, <b>카트 레이스</b>는 드리프트와 부스터로 서킷 {KART_LAPS}바퀴!
+            최대 {MAX_ROOM_PLAYERS}명이 함께 달려요. <b>출근 레이스</b>는 {BRAND.name} 알람에 일어나 캠퍼스까지, <b>카트 레이스</b>는 드리프트와 부스터로 {KART_TRACKS.map((track) => track.emoji).join('')} 트랙 {KART_TRACKS.length}곳 중 하나를 달려요!
           </p>
           {GAME_MODES.map((mode) => (
             <button key={mode} type="button" disabled={!online} className={`sketch-button py-2 text-2xl ${mode === 'kart' ? 'bg-[#2F7DF6] text-white' : 'bg-accent text-white'}`} onClick={() => connection.send({ t: 'quick', mode })}>

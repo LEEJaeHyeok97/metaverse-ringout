@@ -37,12 +37,12 @@ import {
   gridSpot,
   KART_COUNTDOWN_MS,
   KART_GRACE_SECONDS,
-  KART_LAPS,
   KART_LIMIT_SECONDS,
-  KART_MIN_FINISH_SECONDS,
   KART_TOP_SPEED,
+  kartTrackById,
   nearestTrack,
   newTracker,
+  randomKartTrackId,
   type LapTracker,
 } from '../src/game/kart.ts'
 import {
@@ -225,11 +225,11 @@ function lobbySpawn() {
 export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllowed, gardenFile, timing = {} }: RealtimeOptions) {
   const lobbyCountdownMs = timing.lobbyCountdownMs ?? LOBBY_COUNTDOWN_MS
   // 모드마다 출발 신호, 최소 기록, 제한 시간, 1등 뒤 기다리는 시간이 다르다.
-  const rules = (mode: GameMode) =>
-    mode === 'kart'
+  const rules = (room: Room) =>
+    room.mode === 'kart'
       ? {
           countdownMs: timing.gameCountdownMs ?? KART_COUNTDOWN_MS,
-          minFinishSeconds: timing.kartMinFinishSeconds ?? KART_MIN_FINISH_SECONDS,
+          minFinishSeconds: timing.kartMinFinishSeconds ?? kartTrackById(room.mapId).minFinishSeconds,
           limitSeconds: timing.limitSeconds ?? KART_LIMIT_SECONDS,
           graceMs: timing.finishGraceMs ?? KART_GRACE_SECONDS * 1000,
         }
@@ -314,7 +314,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const startGame = (room: Room) => {
     if (room.phase !== 'countdown') return
     if (room.members.length === 0) return
-    const { countdownMs, limitSeconds } = rules(room.mode)
+    const { countdownMs, limitSeconds } = rules(room)
     room.phase = 'playing'
     room.startAt = Date.now() + countdownMs
     room.lanes.clear()
@@ -333,13 +333,14 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       member.inGame = true
       if (room.mode === 'kart') {
         // 카트는 출발선 앞 두 줄로 선다.
-        const spot = gridSpot(lane)
+        const track = kartTrackById(room.mapId)
+        const spot = gridSpot(track, lane)
         member.x = spot.x
         member.y = 0
         member.z = spot.z
         member.h = spot.h
         member.a = ANIMS.indexOf('kart')
-        room.laps.set(member.id, newTracker(nearestTrack(spot.x, spot.z).index))
+        room.laps.set(member.id, newTracker(nearestTrack(track, spot.x, spot.z).index))
         return
       }
       const bed = bedSpot(lane)
@@ -360,8 +361,8 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const beginCountdown = (room: Room) => {
     if (room.phase !== 'waiting') return
     room.phase = 'countdown'
-    // 같은 방에서 연달아 하면 지난 판과 다른 맵이 나온다. 카트 레이스는 서킷 하나뿐이다.
-    if (room.mode === 'commute') room.mapId = randomMapId(room.mapId || undefined)
+    // 같은 방에서 연달아 하면 지난 판과 다른 맵(카트는 다른 트랙)이 나온다.
+    room.mapId = room.mode === 'kart' ? randomKartTrackId(room.mapId || undefined) : randomMapId(room.mapId || undefined)
     for (const member of room.members) send(member, { t: 'countdown', startIn: lobbyCountdownMs, map: room.mapId, mode: room.mode })
     broadcastRoom(room)
     room.timers.push(setTimeout(() => startGame(room), lobbyCountdownMs))
@@ -435,7 +436,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       x = Math.min(Math.max(x, -KART_BOUNDS), KART_BOUNDS)
       z = Math.min(Math.max(z, -KART_BOUNDS), KART_BOUNDS)
       const tracker = room.laps.get(player.id)
-      if (tracker && advanceTracker(tracker, x, z)) broadcastGame(room, { t: 'lap', id: player.id, lap: tracker.laps })
+      if (tracker && advanceTracker(kartTrackById(room.mapId), tracker, x, z)) broadcastGame(room, { t: 'lap', id: player.id, lap: tracker.laps })
     } else if (player.inGame && room?.phase === 'playing') {
       // 출발 전에는 침대에 누워 있어야 한다.
       if (now < room.startAt || room.finished.has(player.id)) return
@@ -465,11 +466,11 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     const room = player.room
     if (!room || room.phase !== 'playing' || !player.inGame || room.finished.has(player.id)) return
     const ms = Date.now() - room.startAt
-    const { minFinishSeconds, graceMs } = rules(room.mode)
+    const { minFinishSeconds, graceMs } = rules(room)
     if (ms < minFinishSeconds * 1000) return
     if (room.mode === 'kart') {
       // 서버가 센 바퀴 수로 확인한다.
-      if ((room.laps.get(player.id)?.laps ?? 0) < KART_LAPS) return
+      if ((room.laps.get(player.id)?.laps ?? 0) < kartTrackById(room.mapId).laps) return
     } else if (player.z > FINISH_Z + FINISH_SLACK) return
     room.finished.set(player.id, ms)
     const rank = room.finished.size
@@ -543,6 +544,14 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       // 유령은 그동안 주먹과 발차기도 통과한다.
       if (area === 'ghost') player.immuneUntil = Math.max(player.immuneUntil, now + GHOST_SECONDS * 1000)
       broadcastGame(room, { t: 'fx', from: player.id, kind: area, x: player.x, z: area === 'bomb' ? player.z - BOMB_AHEAD : player.z })
+      return
+    }
+    // 카트 유도 알람: 아직 달리는 같은 방 카트를 노린다. 누구를 노릴지는 쓴 사람 화면이 순위로 정한다.
+    if (kind === 'alarm') {
+      if (room.mode !== 'kart') return
+      player.lastItemAt = now
+      const target = rivals.find((member) => member.id === targetId)
+      if (target) broadcastGame(room, { t: 'trapped', from: player.id, to: target.id, kind: 'alarm' })
       return
     }
     // 맞힐 사람이 없으면 내 앞 허공에 쓴다. 아이템은 사라지고 연출만 모두에게 보인다.

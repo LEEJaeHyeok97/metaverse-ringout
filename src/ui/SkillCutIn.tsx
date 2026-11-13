@@ -16,6 +16,7 @@ const SKILLS: Record<FxEvent['kind'], { icon: string; name: string; item: string
   ghost: { icon: '👻', name: '유령 변신', item: '유령', color: 'from-[#5B4E80] via-[#A79BD0] to-[#FFFFFF]', flash: '#F3EFFF' },
   snail: { icon: '🐌', name: '달팽이의 저주', item: '달팽이 저주', color: 'from-[#3E7A2E] via-[#8BC34A] to-[#E9A65A]', flash: '#E3F5E9' },
   warp: { icon: '🌀', name: '차원 귀환문', item: '귀가 포털', color: 'from-[#4B1FA8] via-[#A259FF] to-[#E3C8FF]', flash: '#E3C8FF' },
+  alarm: { icon: '⏰', name: '끝까지 쫓아가는 알람', item: '유도 알람', color: 'from-[#B8281E] via-[#EA6E3E] to-[#FFE08A]', flash: '#FDE4D8' },
 }
 
 const SHOW_MS = 1700

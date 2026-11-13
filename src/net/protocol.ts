@@ -56,7 +56,8 @@ export type ClientMessage =
   | { t: 'punch'; target: number; kick?: boolean }
   | { t: 'ride'; bike: number }
   /** 남에게 쓰는 아이템. 물풍선과 귀가 포털은 target을, 우주선은 서버가 1등을 고른다. 바나나는 내 뒤에 놓는다. 맞힐 사람이 없으면 허공에 쓴다. */
-  | { t: 'item'; kind: 'balloon' | 'ufo' | 'banana' | 'warp' | AreaItem; target?: number }
+  /** alarm은 카트 레이스의 유도 알람: target(바로 앞 카트)을 쫓아가 빙글 돌린다. */
+  | { t: 'item'; kind: 'balloon' | 'ufo' | 'banana' | 'warp' | 'alarm' | AreaItem; target?: number }
   /** 차를 타고 있는 사람이 다른 사람을 들이받았다. */
   | { t: 'ram'; target: number }
   | { t: 'slip'; banana: number }
@@ -85,7 +86,7 @@ export type ServerMessage =
   /** 자전거 번호 → 탄 사람. 한 번 탄 따릉이는 그 판에 다시 쓸 수 없다. */
   | { t: 'bikes'; taken: Record<number, number> }
   /** 누군가 아이템에 당했다. 당한 사람의 화면이 효과를 낸다. */
-  | { t: 'trapped'; from: number; to: number; kind: 'balloon' | 'ufo' | 'warp' }
+  | { t: 'trapped'; from: number; to: number; kind: 'balloon' | 'ufo' | 'warp' | 'alarm' }
   /** 궁극기 연출. 맞힐 사람 없이 허공에 쓴 물풍선, 우주선, 귀환 포털은 떨어진 자리(x, z)가 온다. */
   | { t: 'fx'; from: number; kind: 'booster' | 'shield' | 'balloon' | 'ufo' | 'warp' | AreaItem; x?: number; z?: number }
   | { t: 'bananas'; list: { id: number; x: number; z: number; owner: number }[] }

@@ -27,6 +27,7 @@ export const FX_MS: Record<FxEvent['kind'], number> = {
   giant: 1400,
   ghost: 1200,
   snail: SNAIL_SECONDS * 1000 + 200,
+  alarm: 1200,
 }
 
 type Active = FxEvent & { key: number }

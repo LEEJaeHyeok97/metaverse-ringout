@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import { BIKES, FINISH_Z, MAPS } from '../src/game/course.ts'
 import { gardenTile } from '../src/game/lobby.ts'
-import { trackSpot } from '../src/game/kart.ts'
+import { KART_TRACKS, kartTrackById, trackSpot } from '../src/game/kart.ts'
 import type { ServerMessage } from '../src/net/protocol.ts'
 import { attachRealtime } from './realtime.ts'
 
@@ -410,6 +410,9 @@ test('방장이 카트 레이스로 바꾸면 카트 빠른 참가가 그 방에
   host.send({ t: 'start' })
   const [start] = await Promise.all([host.next('start'), racer.next('start')])
   assert.equal(start.mode, 'kart')
+  // 서버가 트랙 중 하나를 골라 모두에게 알린다.
+  assert.ok(KART_TRACKS.some((candidate) => candidate.id === start.map))
+  const track = kartTrackById(start.map)
   await sleep(120)
 
   // 바퀴를 돌지 않고 도착을 알리면 받지 않는다.
@@ -418,7 +421,7 @@ test('방장이 카트 레이스로 바꾸면 카트 빠른 참가가 그 방에
   assert.equal(host.inbox.some((m) => m.t === 'finished'), false)
 
   // 순간이동은 받지 않는다(바퀴도 바뀌지 않는다).
-  const far = trackSpot(400, 0)
+  const far = trackSpot(track, 400, 0)
   host.send({ t: 'move', x: far.x, y: 0, z: far.z, h: 0, a: 0 })
   await sleep(100)
   assert.equal(host.inbox.some((m) => m.t === 'lap'), false)
@@ -430,12 +433,19 @@ test('방장이 카트 레이스로 바꾸면 카트 빠른 참가가 그 방에
   let index = 12 // gridSpot(2)의 샘플 번호
   for (let step = 0; step < 14; step++) {
     index -= 1.5
-    const spot = trackSpot(index, (myLane - 2) * 2.8)
+    const spot = trackSpot(track, index, (myLane - 2) * 2.8)
     host.send({ t: 'move', x: spot.x, y: 0, z: spot.z, h: Math.PI, a: 0 })
     await sleep(40)
   }
   const lap = await racer.next('lap')
   assert.equal(lap.lap, -1)
+
+  // 유도 알람은 노린 카트에게 가고, 모두에게 알린다.
+  await sleep(1600) // 아이템 쿨타임
+  const racerId = joined.room!.members.find((member) => member.nickname === '레이서')!.id
+  host.send({ t: 'item', kind: 'alarm', target: racerId })
+  const alarm = await racer.next('trapped', (m) => m.kind === 'alarm')
+  assert.equal(alarm.to, racerId)
   host.socket.close()
   racer.socket.close()
   walker.socket.close()

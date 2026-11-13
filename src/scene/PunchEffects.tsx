@@ -17,6 +17,7 @@ const WORDS: Record<HitEvent['kind'], string[]> = {
   balloon: ['풍덩!'],
   ufo: ['슈우웅~'],
   warp: ['휘리릭!'],
+  alarm: ['따르릉!', '띠리링!'],
 }
 const BURST: Partial<Record<HitEvent['kind'], { color: string; size: number }>> = {
   punch: { color: '#FFD84D', size: 1 },

@@ -296,7 +296,7 @@ export function Runner({ me }: { me: PlayerInfo | null }) {
       connection.onPunch((hit: HitEvent) => {
         const myId = connection.getState().myId
         if (hit.from === myId && hit.to !== myId) {
-          const done = { punch: '퍽!', kick: '👟 뻥!', ram: '💥 쾅!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!' }[hit.kind]
+          const done = { punch: '퍽!', kick: '👟 뻥!', ram: '💥 쾅!', balloon: '💧 물풍선 명중!', ufo: '🛸 우주선이 붙잡았어요!', warp: '🌀 집으로 보내 버렸어요!', alarm: '⏰ 유도 알람 명중!' }[hit.kind]
           audio.effect('smack')
           // 때린 쪽 화면도 짧고 세게 흔들어 손맛을 낸다.
           if (hit.kind === 'punch' || hit.kind === 'kick' || hit.kind === 'ram') shake(hit.kind === 'punch' ? 0.25 : 0.4, 160)

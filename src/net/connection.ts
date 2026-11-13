@@ -50,10 +50,10 @@ export type ConnectionState = {
 export type GardenTreeView = SharedTree & { plantedAt: number }
 
 /** 아이템 궁극기 연출. 남에게 쓴 아이템은 맞은 사람(to)을, 바나나와 허공에 쓴 아이템은 떨어진 자리(x, z)를 함께 준다. */
-export type FxEvent = { kind: 'booster' | 'shield' | 'banana' | 'balloon' | 'ufo' | 'warp' | AreaItem; from: number; to?: number; x?: number; z?: number; at: number }
+export type FxEvent = { kind: 'booster' | 'shield' | 'banana' | 'balloon' | 'ufo' | 'warp' | 'alarm' | AreaItem; from: number; to?: number; x?: number; z?: number; at: number }
 
 /** 맞거나 아이템에 당한 일. 3D 화면이 효과와 기절을 그리는 데 쓴다. */
-export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'ram' | 'balloon' | 'ufo' | 'warp' }
+export type HitEvent = { from: number; to: number; at: number; kind: 'punch' | 'kick' | 'ram' | 'balloon' | 'ufo' | 'warp' | 'alarm' }
 
 /** 다른 사람의 위치. 스냅샷이 올 때마다 목표값만 바꾸고 화면은 매 프레임 따라간다. */
 export type RemoteState = { x: number; y: number; z: number; h: number; a: number; seenAt: number }

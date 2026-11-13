@@ -77,7 +77,7 @@ export function App() {
     const lane = myId !== null ? (match.lanes[myId] ?? 2) : 2
     applyMap(match.map)
     resetRun(match.startAt, lane)
-    resetKart(match.startAt, lane)
+    resetKart(match.startAt, lane, match.map)
     setActiveMatch({ match, entrants: room?.members ?? [] })
     setPanelOpen(false)
     setOverlayOpen(false)

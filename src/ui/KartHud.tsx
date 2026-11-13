@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { DRIFT_COLORS, driftLevel, KART_ITEM_INFO, KART_LAPS, KART_MAX_SPEED, KART_TRACK_NAME, TRACK } from '../game/kart'
+import { DRIFT_COLORS, driftLevel, KART_ITEM_INFO, KART_MAX_SPEED } from '../game/kart'
 import { kart, kartSeconds } from '../game/kartRun'
 import { run } from '../game/run'
 import { BRAND } from '../lib/brand'
@@ -12,6 +12,7 @@ import { MuteButton } from './MuteButton'
 import { StoreLinks } from './StoreLinks'
 import { TouchControls } from './TouchJoystick'
 import { useTick } from './useTick'
+import { SkillCutIn } from './SkillCutIn'
 
 function formatMs(ms: number) {
   const seconds = Math.max(0, ms) / 1000
@@ -20,17 +21,18 @@ function formatMs(ms: number) {
 
 /** 위에서 내려다본 서킷과 모두의 자리 */
 function MiniMap({ entrants, myId }: { entrants: PlayerInfo[]; myId: number | null }) {
+  const track = kart.track
   const { path, box } = useMemo(() => {
-    const xs = TRACK.map((point) => -point.x)
-    const zs = TRACK.map((point) => -point.z)
+    const xs = track.points.map((point) => -point.x)
+    const zs = track.points.map((point) => -point.z)
     const pad = 14
     const box = { left: Math.min(...xs) - pad, top: Math.min(...zs) - pad, width: Math.max(...xs) - Math.min(...xs) + pad * 2, height: Math.max(...zs) - Math.min(...zs) + pad * 2 }
-    const path = TRACK.filter((_, index) => index % 4 === 0)
+    const path = track.points.filter((_, index) => index % 4 === 0)
       .map((point, index) => `${index === 0 ? 'M' : 'L'}${(-point.x).toFixed(1)} ${(-point.z).toFixed(1)}`)
       .join(' ')
     return { path: `${path} Z`, box }
-  }, [])
-  const start = TRACK[0]
+  }, [track])
+  const start = track.points[0]
   return (
     <svg viewBox={`${box.left} ${box.top} ${box.width} ${box.height}`} className="sketch h-36 w-44 bg-[#E6F2D6] p-1 max-sm:h-24 max-sm:w-28" aria-label="미니맵">
       <path d={path} fill="none" stroke="#1A1A1A" strokeWidth={13} strokeLinejoin="round" />
@@ -52,8 +54,9 @@ function Countdown({ t }: { t: number }) {
   return (
     <div className="flex flex-col items-center gap-2 text-center">
       <p className="sketch bg-[#FFF6C9] px-4 py-1 text-2xl">
-        🏎️ <b>{KART_TRACK_NAME}</b> {KART_LAPS}바퀴
+        {kart.track.emoji} <b>{kart.track.name}</b> {kart.track.laps}바퀴
       </p>
+      <p className="sketch bg-white px-3 text-xl">{kart.track.intro}</p>
       {number <= 3 ? (
         <p key={number} className="pop-in text-8xl font-bold drop-shadow-[4px_4px_0_#fff]">
           {number}
@@ -98,7 +101,14 @@ function SpeedPanel() {
         </p>
       )}
       {boosting && <p className="sketch bg-accent-soft px-4 py-1 text-2xl font-bold">🔥 터보!</p>}
-      {kart.onGrass && !boosting && <p className="sketch bg-[#E3F5E9] px-3 text-lg">🌱 잔디에서는 느려져요</p>}
+      <div className="flex flex-wrap justify-center gap-1">
+        {now < kart.shieldUntil && <span className="sketch bg-[#E3F0FF] px-2 text-lg">🛡️ 방패 {Math.ceil((kart.shieldUntil - now) / 1000)}초</span>}
+        {now < kart.ghostUntil && <span className="sketch bg-[#F3EFFF] px-2 text-lg">👻 유령 {Math.ceil((kart.ghostUntil - now) / 1000)}초</span>}
+        {now < kart.giantUntil && <span className="sketch bg-[#FFE0DC] px-2 text-lg">🍄 거인 {Math.ceil((kart.giantUntil - now) / 1000)}초</span>}
+        {now < kart.slowUntil && <span className="sketch bg-[#E3F5E9] px-2 text-lg">🐌 느릿느릿 {Math.ceil((kart.slowUntil - now) / 1000)}초</span>}
+      </div>
+      {kart.onGrass && kart.track.open && kart.fallUntil === 0 && <p className="sketch pop-in bg-accent px-3 text-xl font-bold text-white">⚠️ 길 끝이에요! 떨어져요</p>}
+      {kart.onGrass && !kart.track.open && !boosting && <p className="sketch bg-[#E3F5E9] px-3 text-lg">🌱 잔디에서는 느려져요</p>}
       <div className="sketch flex items-center gap-2 px-3 py-1">
         <span className="w-20 text-right text-3xl font-bold tabular-nums">{Math.round(speed * 4)}</span>
         <span className="text-base">km/h</span>
@@ -115,8 +125,8 @@ function ItemSlot() {
   const info = kart.item ? KART_ITEM_INFO[kart.item] : null
   return (
     <div className="flex items-center gap-2">
-      <div className={`sketch flex min-h-16 min-w-16 flex-col items-center justify-center px-1 ${info ? 'pop-in bg-[#FFF6C9]' : ''}`} key={`${kart.item}-${kart.itemUses}`} title={info?.help}>
-        <span className="text-3xl leading-none">{info ? (kart.item === 'triple' ? '🚀'.repeat(kart.itemUses) : info.icon) : '🎁'}</span>
+      <div className={`sketch flex min-h-16 min-w-16 flex-col items-center justify-center px-1 ${info ? 'pop-in bg-[#FFF6C9]' : ''}`} key={kart.item ?? 'empty'} title={info?.help}>
+        <span className="text-3xl leading-none">{info?.icon ?? '🎁'}</span>
         <span className="text-xs">{info ? 'E로 사용' : '빈 칸'}</span>
       </div>
       {info && (
@@ -134,7 +144,7 @@ function Results({ rows, myId }: { rows: ResultRow[]; myId: number | null }) {
   return (
     <div className="pointer-events-auto absolute inset-0 grid place-items-center bg-ink/30 p-4">
       <section className="sketch pop-in flex w-full max-w-md flex-col gap-3 p-5" aria-label="카트 레이스 결과">
-        <h2 className="text-center text-4xl font-bold">🏁 {KART_TRACK_NAME} 결과</h2>
+        <h2 className="text-center text-4xl font-bold">{kart.track.emoji} {kart.track.name} 결과</h2>
         <ol className="flex flex-col gap-1">
           {rows.map((row) => (
             <li key={row.id} className={`flex items-center gap-2 rounded-lg border-2 px-2 py-1 text-xl ${row.id === myId ? 'border-ink bg-accent-soft' : 'border-transparent'}`}>
@@ -166,7 +176,7 @@ export function KartHud({ state, match, entrants }: { state: ConnectionState; ma
   useTick(100)
   const t = kartSeconds()
   const now = performance.now()
-  const lap = Math.min(KART_LAPS, kart.tracker.laps + 1)
+  const lap = Math.min(kart.track.laps, kart.tracker.laps + 1)
   const myRank = match.finishes.find((finish) => finish.id === state.myId)?.rank ?? null
   const racing = kart.phase === 'racing'
 
@@ -177,6 +187,7 @@ export function KartHud({ state, match, entrants }: { state: ConnectionState; ma
           <div className="speed-lines absolute inset-[-20%] rotate-90 opacity-30" />
         </div>
       )}
+      <SkillCutIn />
       {!state.results && <ClosingCountdown match={match} myId={state.myId} />}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col items-start gap-2">
@@ -184,7 +195,7 @@ export function KartHud({ state, match, entrants }: { state: ConnectionState; ma
             <RingoutLogo className="size-10 max-sm:size-8" />
             <div className="leading-tight">
               <p className="text-3xl font-bold tabular-nums max-sm:text-2xl">
-                {lap}/{KART_LAPS} <span className="text-lg">바퀴</span>
+                {lap}/{kart.track.laps} <span className="text-lg">바퀴</span>
               </p>
               <p className="text-lg tabular-nums">{formatMs(Math.max(0, (kart.phase === 'finished' ? kart.finishedAt : now) - kart.startAt))}</p>
             </div>
@@ -208,7 +219,7 @@ export function KartHud({ state, match, entrants }: { state: ConnectionState; ma
               <span className="text-2xl">/{kart.total}등</span>
             </p>
           )}
-          {racing && kart.tracker.laps === KART_LAPS - 1 && <p className="sketch bg-[#FFF6C9] px-3 text-xl font-bold">🔔 마지막 바퀴</p>}
+          {racing && kart.tracker.laps === kart.track.laps - 1 && <p className="sketch bg-[#FFF6C9] px-3 text-xl font-bold">🔔 마지막 바퀴</p>}
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
@@ -257,7 +268,7 @@ export function KartHud({ state, match, entrants }: { state: ConnectionState; ma
       {racing && <SpeedPanel />}
       {racing && (
         <div className="pointer-events-auto">
-          <TouchControls actionLabel="드리프트" punch={false} item={kart.item ? KART_ITEM_INFO[kart.item].icon.slice(0, 2) : null} />
+          <TouchControls actionLabel="드리프트" punch={false} item={kart.item ? KART_ITEM_INFO[kart.item].icon : null} />
         </div>
       )}
       {state.results && <Results rows={state.results} myId={state.myId} />}
