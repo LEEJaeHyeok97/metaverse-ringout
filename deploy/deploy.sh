@@ -9,8 +9,13 @@ if [ ! -f .env ]; then
 fi
 
 git -C .. pull --ff-only
+# 디스크(8GB)가 작아서 지난 빌드 캐시와 안 쓰는 이미지를 먼저 비운다. 돌아가는 서버와 정원 볼륨은 그대로다.
+docker builder prune -af >/dev/null
+docker image prune -af >/dev/null
 docker compose up -d --build
-docker image prune -f >/dev/null
+docker builder prune -af >/dev/null
+docker image prune -af >/dev/null
+df -h / | tail -1 | awk '{print "💾 남은 디스크: " $4}'
 
 echo "▶ 서버가 뜨기를 기다리는 중 (micro는 몇 초 걸린다)"
 for _ in $(seq 1 30); do
