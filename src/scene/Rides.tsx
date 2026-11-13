@@ -201,3 +201,58 @@ export function RideModel({ kind }: { kind: RideKind }) {
       return <TruckModel />
   }
 }
+
+/** 카트 레이스용 카트. 낮은 차체에 사람이 다리를 앞으로 뻗고 앉는다. 차체는 탄 사람의 색이다. */
+export function KartModel({ color }: { color: string }) {
+  return (
+    <group>
+      {[
+        [0.78, 0.62],
+        [-0.78, 0.62],
+        [0.82, -0.72],
+        [-0.82, -0.72],
+      ].map(([x, z]) => (
+        <Wheel key={`${x},${z}`} position={[x, 0.3, z]} radius={z < 0 ? 0.32 : 0.27} />
+      ))}
+      {/* 바닥판과 앞 범퍼 */}
+      <mesh position={[0, 0.3, 0]}>
+        <boxGeometry args={[1.25, 0.16, 2.1]} />
+        <Ink color={color} thickness={2} />
+      </mesh>
+      <mesh position={[0, 0.42, 1.05]}>
+        <boxGeometry args={[1.5, 0.22, 0.3]} />
+        <Ink color={color} thickness={2} />
+      </mesh>
+      {/* 앞코 덮개 */}
+      <mesh position={[0, 0.52, 0.62]} rotation={[-0.25, 0, 0]}>
+        <boxGeometry args={[0.9, 0.2, 0.7]} />
+        <Ink color="#ffffff" thickness={2} />
+      </mesh>
+      {/* 의자 */}
+      <mesh position={[0, 0.48, -0.28]}>
+        <boxGeometry args={[0.7, 0.18, 0.6]} />
+        <meshBasicMaterial color={COLORS.ink} />
+      </mesh>
+      <mesh position={[0, 0.85, -0.6]} rotation={[-0.2, 0, 0]}>
+        <boxGeometry args={[0.7, 0.7, 0.14]} />
+        <meshBasicMaterial color={COLORS.ink} />
+      </mesh>
+      {/* 핸들 */}
+      <mesh position={[0, 0.95, 0.38]} rotation={[0.9, 0, 0]}>
+        <torusGeometry args={[0.2, 0.04, 6, 16]} />
+        <meshBasicMaterial color={COLORS.ink} />
+      </mesh>
+      {/* 뒤 엔진과 배기통 */}
+      <mesh position={[0, 0.55, -1.0]}>
+        <boxGeometry args={[0.8, 0.4, 0.35]} />
+        <Ink color="#BFC5CC" thickness={2} />
+      </mesh>
+      {[-0.25, 0.25].map((x) => (
+        <mesh key={x} position={[x, 0.55, -1.25]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.07, 0.07, 0.3, 8]} />
+          <meshBasicMaterial color={COLORS.ink} />
+        </mesh>
+      ))}
+    </group>
+  )
+}

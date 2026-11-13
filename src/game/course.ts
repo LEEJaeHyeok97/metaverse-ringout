@@ -264,8 +264,9 @@ export const BODY_RADIUS = 0.45
 /** 링아웃은 도착할 때까지 이 주기로 다시 울린다. */
 export const ALARM_PERIOD = 10
 export const ALARM_RING_SECONDS = 2.5
-export const WAKE_PRESSES = 15
-export const WAKE_DECAY_PER_SECOND = 2
+/** 알람이 울리면 스페이스를 이만큼 눌러 일어난다. 연타가 힘들다는 의견에 두 번으로 줄였고, 누른 횟수는 줄어들지 않는다. */
+export const WAKE_PRESSES = 2
+export const WAKE_DECAY_PER_SECOND = 0
 
 /** 출발 전 카운트다운 */
 export const COUNTDOWN_MS = 4000

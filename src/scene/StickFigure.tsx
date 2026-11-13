@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { Anim } from '../net/protocol'
 import { COLORS } from '../lib/brand'
 import { Ink, penMaterial } from './ink'
-import { BikeModel, RideModel } from './Rides'
+import { BikeModel, KartModel, RideModel } from './Rides'
 import type { RideKind } from '../game/course'
 
 // 세워 둔 따릉이를 그리던 곳에서 계속 쓸 수 있게 다시 내보낸다.
@@ -124,6 +124,24 @@ function poseFor(anim: Anim, t: number, speed: number, phase: number): Pose {
     case 'scooter':
       // 스쿠터 안장에 앉아 두 손으로 핸들을 잡는다.
       return { ...REST, lean: 0.15, bob: -0.2, hipL: 1.3, kneeL: 1.1, hipR: 1.3, kneeR: 1.1, shoulderL: 1.2, shoulderR: 1.2, shoulderLz: 0.15, shoulderRz: -0.15, elbowL: -0.2, elbowR: -0.2 }
+    case 'kart':
+    case 'drift':
+      // 카트 의자에 낮게 앉아 다리를 앞으로 뻗고 핸들을 잡는다. 드리프트 중에는 몸을 안쪽으로 기울인다.
+      return {
+        ...REST,
+        lean: anim === 'drift' ? 0.2 : -0.05,
+        bob: -0.42,
+        hipL: 1.45,
+        kneeL: 0.45,
+        hipR: 1.45,
+        kneeR: 0.45,
+        shoulderL: 1.05,
+        shoulderR: 1.05,
+        shoulderLz: 0.25,
+        shoulderRz: -0.25,
+        elbowL: -0.45,
+        elbowR: -0.45,
+      }
     case 'car':
     case 'sports':
     case 'truck':
@@ -180,6 +198,8 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
   const ghost = useRef<THREE.Group>(null)
   const bubble = useRef<THREE.Mesh>(null)
   const ufo = useRef<THREE.Group>(null)
+  const kartRef = useRef<THREE.Group>(null)
+  const sparks = useRef<THREE.Group>(null)
   const phase = useRef(Math.random() * 10)
   const current = useRef<Pose>({ ...REST })
   const scarfTail = useMemo(() => new THREE.BoxGeometry(0.12, 0.34, 0.04), [])
@@ -212,6 +232,11 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
       stars.current.rotation.y = t * 5
     }
     if (bike.current) bike.current.visible = anim === 'ride'
+    if (kartRef.current) kartRef.current.visible = anim === 'kart' || anim === 'drift'
+    if (sparks.current) {
+      sparks.current.visible = anim === 'drift'
+      sparks.current.children.forEach((child, index) => child.scale.setScalar(0.6 + Math.abs(Math.sin(t * 30 + index * 1.7)) * 0.8))
+    }
     for (const [kind, node] of Object.entries(drives.current)) if (node) node.visible = DRIVES[anim] === kind
     if (ghost.current) {
       ghost.current.visible = motion.current.ghost === true
@@ -240,6 +265,18 @@ export function StickFigure({ motion, color }: { motion: RefObject<Motion>; colo
     <group ref={root}>
       <group ref={bike} visible={false}>
         <BikeModel />
+      </group>
+      <group ref={kartRef} visible={false}>
+        <KartModel color={color} />
+        {/* 드리프트 불꽃: 뒷바퀴 옆에서 튄다. */}
+        <group ref={sparks} visible={false}>
+          {[-0.85, 0.85].map((x) => (
+            <mesh key={x} position={[x, 0.15, -0.95]}>
+              <octahedronGeometry args={[0.16]} />
+              <meshBasicMaterial color="#FFB020" />
+            </mesh>
+          ))}
+        </group>
       </group>
       {(['scooter', 'car', 'sports', 'truck'] as const).map((kind) => (
         <group

@@ -180,7 +180,7 @@ function CenterMessage({ t, myRank }: { t: number; myRank: number | null }) {
         <p className="text-lg text-pencil">{activeMap.intro}</p>
         <p className="text-2xl">모두 각자의 방에서 쿨쿨…</p>
         <p key={Math.ceil(-t)} className="pop-in text-7xl font-bold">{Math.ceil(-t)}</p>
-        <p className="text-xl">알람이 울리면 스페이스를 연타해서 일어나요!</p>
+        <p className="text-xl">알람이 울리면 스페이스를 두 번 눌러 일어나요!</p>
       </div>
     )
   }
@@ -188,7 +188,7 @@ function CenterMessage({ t, myRank }: { t: number; myRank: number | null }) {
     return (
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="ringing text-3xl font-bold text-accent">따르르릉! {BRAND.name} 알람!</p>
-        <p className="text-xl">스페이스를 연타해서 일어나기</p>
+        <p className="text-xl">스페이스를 두 번 눌러 일어나기</p>
         <div className="h-5 w-64 overflow-hidden rounded-full border-[2.5px] border-ink bg-white">
           <div className="h-full bg-accent transition-[width] duration-100" style={{ width: `${(run.wake / WAKE_PRESSES) * 100}%` }} />
         </div>

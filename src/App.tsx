@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { applyMap } from './game/course'
+import { resetKart } from './game/kartRun'
 import { resetRun } from './game/run'
 import { audio } from './lib/audio'
 import { connection, useConnection, type GameInfo } from './net/connection'
@@ -10,6 +11,8 @@ import { bindKeyboard, setOverlayOpen } from './scene/input'
 import { LobbyScene } from './scene/LobbyScene'
 import { EntryScreen, type Profile } from './ui/EntryScreen'
 import { GameHud } from './ui/GameHud'
+import { KartHud } from './ui/KartHud'
+import { KartScene } from './scene/kart/KartScene'
 import { InfoModal } from './ui/InfoModal'
 import { GardenModal } from './ui/GardenModal'
 import { LobbyHud } from './ui/LobbyHud'
@@ -71,8 +74,10 @@ export function App() {
     const match = connection.getState().match!
     const { myId, room } = connection.getState()
     // 게임 화면을 그리기 전에 이번 판의 맵으로 코스를 바꾼다.
+    const lane = myId !== null ? (match.lanes[myId] ?? 2) : 2
     applyMap(match.map)
-    resetRun(match.startAt, myId !== null ? (match.lanes[myId] ?? 2) : 2)
+    resetRun(match.startAt, lane)
+    resetKart(match.startAt, lane)
     setActiveMatch({ match, entrants: room?.members ?? [] })
     setPanelOpen(false)
     setOverlayOpen(false)
@@ -108,18 +113,23 @@ export function App() {
   }
 
   const inGame = activeMatch !== null && state.match !== null
-  const match = inGame ? { ...activeMatch.match, finishes: state.match!.finishes, closingAt: state.match!.closingAt } : null
+  const match = inGame ? { ...activeMatch.match, finishes: state.match!.finishes, closingAt: state.match!.closingAt, laps: state.match!.laps } : null
+  const kartMode = match?.mode === 'kart'
 
   return (
     <main className="relative h-full w-full overflow-hidden">
       <Canvas flat camera={{ position: [0, 12, 26], fov: 50, near: 0.1, far: 600 }} dpr={[1, 2]}>
-        {match && activeMatch ? (
+        {match && activeMatch && kartMode ? (
+          <KartScene key={match.startAt} me={me} players={state.game} />
+        ) : match && activeMatch ? (
           <GameScene key={match.startAt} me={me} match={match} entrants={activeMatch.entrants} players={state.game} />
         ) : (
           <LobbyScene me={me} players={state.lobby} onPadChange={(inside) => inside && setPanelOpen(true)} nearInfo={nearInfo} onNearInfo={setNearInfo} onOpenInfo={openInfo} />
         )}
       </Canvas>
-      {match && activeMatch ? (
+      {match && activeMatch && kartMode ? (
+        <KartHud state={state} match={match} entrants={activeMatch.entrants} />
+      ) : match && activeMatch ? (
         <GameHud state={state} match={match} entrants={activeMatch.entrants} />
       ) : (
         <>

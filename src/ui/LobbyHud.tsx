@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { BRAND } from '../lib/brand'
 import { mapById, MAX_ROOM_PLAYERS } from '../game/course'
+import { KART_LAPS, KART_TRACK_NAME, MODE_INFO } from '../game/kart'
+import { GAME_MODES, type GameMode } from '../net/protocol'
 import { INTRO_BOARDS } from '../data/ringout'
 import { plantableCount, useGarden } from '../data/garden'
 import { connection, type ConnectionState } from '../net/connection'
@@ -26,10 +28,20 @@ function StatusPill({ state }: { state: ConnectionState }) {
   )
 }
 
-function Countdown({ departAt, mapId }: { departAt: number; mapId: string | null }) {
+function Countdown({ departAt, mapId, mode }: { departAt: number; mapId: string | null; mode: GameMode | null }) {
   useTick(100)
   const left = Math.max(0, Math.ceil((departAt - performance.now()) / 1000))
   const map = mapId ? mapById(mapId) : null
+  if (mode === 'kart') {
+    return (
+      <div className="pop-in flex flex-col items-center gap-1 text-center">
+        <p className="sketch bg-[#FFF6C9] px-3 py-1 text-xl">
+          🏎️ <b>{KART_TRACK_NAME}</b> {KART_LAPS}바퀴
+        </p>
+        <p className="text-2xl font-bold text-accent">{left}초 뒤 출발선에 서요!</p>
+      </div>
+    )
+  }
   return (
     <div className="pop-in flex flex-col items-center gap-1 text-center">
       {map && (
@@ -54,7 +66,7 @@ function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => 
   return (
     <section className="sketch pointer-events-auto pop-in flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 p-4" aria-label="출근 대기실">
       <header className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">🏃 출근 대기실</h2>
+        <h2 className="text-2xl font-bold">{room ? `${MODE_INFO[room.mode].icon} ${MODE_INFO[room.mode].name} 대기실` : '🏁 레이스 대기실'}</h2>
         {!room && (
           <button type="button" className="text-2xl leading-none" aria-label="닫기" onClick={onClose}>
             ✕
@@ -69,11 +81,13 @@ function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => 
       {!room ? (
         <>
           <p className="text-lg leading-snug">
-            최대 {MAX_ROOM_PLAYERS}명이 각자 집에서 {BRAND.name} 알람을 듣고 일어나, 우테코 캠퍼스까지 누가 먼저 도착하는지 겨뤄요.
+            최대 {MAX_ROOM_PLAYERS}명이 함께 달려요. <b>출근 레이스</b>는 {BRAND.name} 알람에 일어나 캠퍼스까지, <b>카트 레이스</b>는 드리프트와 부스터로 서킷 {KART_LAPS}바퀴!
           </p>
-          <button type="button" disabled={!online} className="sketch-button bg-accent py-2 text-2xl text-white" onClick={() => connection.send({ t: 'quick' })}>
-            빠른 참가
-          </button>
+          {GAME_MODES.map((mode) => (
+            <button key={mode} type="button" disabled={!online} className={`sketch-button py-2 text-2xl ${mode === 'kart' ? 'bg-[#2F7DF6] text-white' : 'bg-accent text-white'}`} onClick={() => connection.send({ t: 'quick', mode })}>
+              {MODE_INFO[mode].icon} {MODE_INFO[mode].name} 빠른 참가
+            </button>
+          ))}
           <button type="button" disabled={!online} className="sketch-button bg-white py-2 text-xl" onClick={() => connection.send({ t: 'create' })}>
             친구랑 할 방 만들기
           </button>
@@ -119,9 +133,28 @@ function RoomPanel({ state, onClose }: { state: ConnectionState; onClose: () => 
             })}
           </ol>
           {state.departAt ? (
-            <Countdown departAt={state.departAt} mapId={state.nextMap} />
+            <Countdown departAt={state.departAt} mapId={state.nextMap} mode={state.nextMode} />
           ) : (
             <>
+              {room.hostId === state.myId ? (
+                <div className="grid grid-cols-2 gap-2" role="group" aria-label="게임 고르기">
+                  {GAME_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={room.mode === mode}
+                      className={`sketch-button py-1 text-lg ${room.mode === mode ? 'bg-[#FFF6C9] font-bold' : 'bg-white text-pencil'}`}
+                      onClick={() => connection.send({ t: 'mode', mode })}
+                    >
+                      {MODE_INFO[mode].icon} {MODE_INFO[mode].name}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-lg">
+                  {MODE_INFO[room.mode].icon} {MODE_INFO[room.mode].help}
+                </p>
+              )}
               <p className="text-center text-lg text-pencil">{MAX_ROOM_PLAYERS}명이 모이면 자동으로 출발해요</p>
               {room.hostId === state.myId && (
                 <button type="button" className="sketch-button bg-accent py-2 text-2xl text-white" onClick={() => connection.send({ t: 'start' })}>
@@ -176,7 +209,7 @@ export function LobbyHud({ state, panelOpen, onOpenPanel, onClosePanel, nearInfo
           </div>
           {!showPanel && (
             <button type="button" className="sketch-button pointer-events-auto bg-accent px-4 py-2 text-2xl text-white" onClick={onOpenPanel}>
-              🏃 출근 레이스
+              🏁 레이스 하러 가기
             </button>
           )}
         </div>

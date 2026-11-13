@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import { BIKES, FINISH_Z, MAPS } from '../src/game/course.ts'
 import { gardenTile } from '../src/game/lobby.ts'
+import { trackSpot } from '../src/game/kart.ts'
 import type { ServerMessage } from '../src/net/protocol.ts'
 import { attachRealtime } from './realtime.ts'
 
@@ -378,4 +379,85 @@ test('차를 탄 사람만 가까운 사람을 들이받을 수 있고, 범위 �
   assert.ok(bomb.z !== undefined && bomb.z < car.z)
   driver.socket.close()
   walker.socket.close()
+})
+
+test('방장이 카트 레이스로 바꾸면 카트 빠른 참가가 그 방에 들어오고, 출발선에서 시작한다', async () => {
+  const host = await connect('카트장')
+  host.send({ t: 'create' })
+  const created = await host.next('room', (m) => m.room !== null)
+  assert.equal(created.room?.mode, 'commute')
+  host.send({ t: 'mode', mode: 'kart' })
+  const changed = await host.next('room', (m) => m.room?.mode === 'kart')
+  const code = changed.room!.code
+
+  // 출근 레이스 빠른 참가는 카트 방에 들어가지 않는다.
+  const walker = await connect('걷는이')
+  walker.send({ t: 'quick', mode: 'commute' })
+  const walkerRoom = await walker.next('room', (m) => m.room !== null)
+  assert.notEqual(walkerRoom.room?.code, code)
+  walker.send({ t: 'leave' })
+
+  const racer = await connect('레이서')
+  racer.send({ t: 'quick', mode: 'kart' })
+  const joined = await racer.next('room', (m) => m.room !== null)
+  assert.equal(joined.room?.code, code)
+  assert.equal(joined.room?.mode, 'kart')
+  // 방장이 아니면 게임을 바꿀 수 없다.
+  racer.send({ t: 'mode', mode: 'commute' })
+  await sleep(80)
+  assert.equal(racer.inbox.some((m) => m.t === 'room' && m.room?.mode === 'commute'), false)
+
+  host.send({ t: 'start' })
+  const [start] = await Promise.all([host.next('start'), racer.next('start')])
+  assert.equal(start.mode, 'kart')
+  await sleep(120)
+
+  // 바퀴를 돌지 않고 도착을 알리면 받지 않는다.
+  host.send({ t: 'finish' })
+  await sleep(150)
+  assert.equal(host.inbox.some((m) => m.t === 'finished'), false)
+
+  // 순간이동은 받지 않는다(바퀴도 바뀌지 않는다).
+  const far = trackSpot(400, 0)
+  host.send({ t: 'move', x: far.x, y: 0, z: far.z, h: 0, a: 0 })
+  await sleep(100)
+  assert.equal(host.inbox.some((m) => m.t === 'lap'), false)
+
+  // 출발선 뒤로 천천히 넘어가면 바퀴가 줄었다고 모두에게 알린다.
+  // 방장이 먼저 들어왔으므로 가운데 자리(2번)에서 출발한다.
+  const myLane = 2
+  assert.ok(Object.values(start.lanes).includes(myLane))
+  let index = 12 // gridSpot(2)의 샘플 번호
+  for (let step = 0; step < 14; step++) {
+    index -= 1.5
+    const spot = trackSpot(index, (myLane - 2) * 2.8)
+    host.send({ t: 'move', x: spot.x, y: 0, z: spot.z, h: Math.PI, a: 0 })
+    await sleep(40)
+  }
+  const lap = await racer.next('lap')
+  assert.equal(lap.lap, -1)
+  host.socket.close()
+  racer.socket.close()
+  walker.socket.close()
+})
+
+test('앞마당 양끝에 세워진 탈것도 탈 수 있다', async () => {
+  const rider = await connect('끝집')
+  rider.send({ t: 'create' })
+  await rider.next('room', (m) => m.room !== null)
+  rider.send({ t: 'start' })
+  const start = await rider.next('start')
+  await sleep(120)
+  // 맵마다 골목 탈것은 같다. 가장 바깥(x가 가장 큰) 탈것으로 걸어간다.
+  const edge = BIKES.filter((bike) => bike.z > -24).sort((a, b) => Math.abs(b.x) - Math.abs(a.x))[0]
+  assert.ok(Math.abs(edge.x) > 16, `맵 ${start.map}의 가장 바깥 탈것이 도로 폭 밖에 있어야 한다`)
+  const steps = 12
+  for (let step = 1; step <= steps; step++) {
+    rider.send({ t: 'move', x: (edge.x * step) / steps, y: 0, z: -0.4 + ((edge.z + 0.4) * step) / steps, h: 0, a: 1 })
+    await sleep(40)
+  }
+  rider.send({ t: 'ride', bike: edge.id })
+  const bikes = await rider.next('bikes')
+  assert.ok(Object.keys(bikes.taken).includes(String(edge.id)))
+  rider.socket.close()
 })

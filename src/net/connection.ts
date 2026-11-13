@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { recordPlanted } from '../data/garden'
 import { GHOST_SECONDS, GIANT_SECONDS } from '../game/course'
-import type { AreaItem, ClientMessage, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
+import type { AreaItem, ClientMessage, GameMode, PlayerInfo, ResultRow, RoomView, ServerMessage, SharedTree } from './protocol'
 
 const RETRY_MS = 2000
 const CLOSE_FULL = 4001
@@ -13,7 +13,17 @@ export type Status = 'connecting' | 'online' | 'offline' | 'full'
 export type ChatLine = { key: number; id: number; nickname: string; text: string; at: number }
 
 /** 시작 시각은 받은 순간의 내 시계(performance.now) 기준으로 바꿔 둔다. */
-export type GameInfo = { startAt: number; lanes: Record<number, number>; map: string; finishes: { id: number; ms: number; rank: number }[]; /** 1등이 도착해 게임이 끝나는 시각(내 시계) */ closingAt?: number }
+export type GameInfo = {
+  startAt: number
+  lanes: Record<number, number>
+  map: string
+  mode: GameMode
+  finishes: { id: number; ms: number; rank: number }[]
+  /** 1등이 도착해 게임이 끝나는 시각(내 시계) */
+  closingAt?: number
+  /** 카트 레이스: 서버가 센 사람마다의 바퀴 수 */
+  laps: Record<number, number>
+}
 
 export type ConnectionState = {
   status: Status
@@ -23,8 +33,9 @@ export type ConnectionState = {
   room: RoomView | null
   /** 방이 모여 집으로 출발하기 직전의 카운트다운이 끝나는 시각 */
   departAt: number | null
-  /** 대기실 카운트다운 중에 미리 알려 준 이번 맵 */
+  /** 대기실 카운트다운 중에 미리 알려 준 이번 맵과 게임 */
   nextMap: string | null
+  nextMode: GameMode | null
   match: GameInfo | null
   results: ResultRow[] | null
   chats: ChatLine[]
@@ -62,6 +73,7 @@ function createConnection() {
     room: null,
     departAt: null,
     nextMap: null,
+    nextMode: null,
     match: null,
     results: null,
     chats: [],
@@ -129,11 +141,22 @@ function createConnection() {
         set({ room: message.room, departAt: message.room?.phase === 'countdown' ? state.departAt : null })
         return
       case 'countdown':
-        set({ departAt: performance.now() + message.startIn, nextMap: message.map })
+        set({ departAt: performance.now() + message.startIn, nextMap: message.map, nextMode: message.mode })
         return
       case 'start':
         positions.clear()
-        set({ match: { startAt: performance.now() + message.startIn, lanes: message.lanes, map: message.map, finishes: [] }, results: null, departAt: null, nextMap: null, bikes: {}, bananas: [] })
+        set({
+          match: { startAt: performance.now() + message.startIn, lanes: message.lanes, map: message.map, mode: message.mode ?? 'commute', finishes: [], laps: {} },
+          results: null,
+          departAt: null,
+          nextMap: null,
+          nextMode: null,
+          bikes: {},
+          bananas: [],
+        })
+        return
+      case 'lap':
+        if (state.match) set({ match: { ...state.match, laps: { ...state.match.laps, [message.id]: message.lap } } })
         return
       case 'finished':
         if (state.match) set({ match: { ...state.match, finishes: [...state.match.finishes, { id: message.id, ms: message.ms, rank: message.rank }] } })

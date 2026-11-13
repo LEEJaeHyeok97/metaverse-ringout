@@ -10,7 +10,7 @@ import {
   FINISH_GRACE_SECONDS,
   MAX_ROOM_PLAYERS,
   MIN_FINISH_SECONDS,
-  STREET_HALF_W,
+  YARD_HALF_W,
   WALK_SPEED,
   MAX_RIDE_FACTOR,
   RIDES,
@@ -33,6 +33,21 @@ import {
   HOUSE_BACK_Z,
 } from '../src/game/course.ts'
 import {
+  advanceTracker,
+  gridSpot,
+  KART_COUNTDOWN_MS,
+  KART_GRACE_SECONDS,
+  KART_LAPS,
+  KART_LIMIT_SECONDS,
+  KART_MIN_FINISH_SECONDS,
+  KART_TOP_SPEED,
+  nearestTrack,
+  newTracker,
+  type LapTracker,
+} from '../src/game/kart.ts'
+import {
+  GAME_MODES,
+  type GameMode,
   ANIMS,
   MAX_CHAT_LENGTH,
   MAX_NICKNAME_LENGTH,
@@ -65,6 +80,10 @@ const MAX_SPEED = WALK_SPEED * MAX_RIDE_FACTOR * 1.25
 // 서버의 위치는 화면보다 조금 늦으므로 닿는 거리에 여유를 둔다.
 const REACH_SLACK = 1
 const FINISH_SLACK = 3
+/** 카트 레이스 서킷 밖으로 이만큼 넘게는 못 나간다. */
+const KART_BOUNDS = 400
+/** 카트가 한 번 보낸 위치에서 다음 위치까지 갈 수 있는 거리 여유 */
+const KART_SPEED_SLACK = 1.3
 /** 허공에 쓴 아이템이 떨어지는 거리(내 앞) */
 const MISS_AHEAD = 10
 const LINK_PATTERN = /(https?:\/\/|www\.)/i
@@ -84,7 +103,7 @@ export type RealtimeOptions = {
   /** 함께 정원을 저장할 파일. 없으면 서버가 꺼질 때 정원도 사라진다. */
   gardenFile?: string
   /** 테스트에서 기다리는 시간을 줄일 때만 바꾼다. */
-  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number }
+  timing?: { lobbyCountdownMs?: number; gameCountdownMs?: number; minFinishSeconds?: number; limitSeconds?: number; finishGraceMs?: number; kartMinFinishSeconds?: number }
 }
 
 type Player = {
@@ -133,6 +152,10 @@ type Room = {
   nextBanana: number
   /** 이번 판의 맵. 출발 카운트다운을 시작할 때 고른다. */
   mapId: string
+  /** 출근 레이스 또는 카트 레이스. 방장이 대기실에서 바꾼다. */
+  mode: GameMode
+  /** 카트 레이스: 사람마다 지난 바퀴 수와 트랙 위 자리 */
+  laps: Map<number, LapTracker>
   timers: ReturnType<typeof setTimeout>[]
 }
 
@@ -201,10 +224,21 @@ function lobbySpawn() {
  */
 export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllowed, gardenFile, timing = {} }: RealtimeOptions) {
   const lobbyCountdownMs = timing.lobbyCountdownMs ?? LOBBY_COUNTDOWN_MS
-  const gameCountdownMs = timing.gameCountdownMs ?? COUNTDOWN_MS
-  const minFinishSeconds = timing.minFinishSeconds ?? MIN_FINISH_SECONDS
-  const limitSeconds = timing.limitSeconds ?? GAME_LIMIT_SECONDS
-  const finishGraceMs = timing.finishGraceMs ?? FINISH_GRACE_SECONDS * 1000
+  // 모드마다 출발 신호, 최소 기록, 제한 시간, 1등 뒤 기다리는 시간이 다르다.
+  const rules = (mode: GameMode) =>
+    mode === 'kart'
+      ? {
+          countdownMs: timing.gameCountdownMs ?? KART_COUNTDOWN_MS,
+          minFinishSeconds: timing.kartMinFinishSeconds ?? KART_MIN_FINISH_SECONDS,
+          limitSeconds: timing.limitSeconds ?? KART_LIMIT_SECONDS,
+          graceMs: timing.finishGraceMs ?? KART_GRACE_SECONDS * 1000,
+        }
+      : {
+          countdownMs: timing.gameCountdownMs ?? COUNTDOWN_MS,
+          minFinishSeconds: timing.minFinishSeconds ?? MIN_FINISH_SECONDS,
+          limitSeconds: timing.limitSeconds ?? GAME_LIMIT_SECONDS,
+          graceMs: timing.finishGraceMs ?? FINISH_GRACE_SECONDS * 1000,
+        }
 
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES })
   const players = new Map<WebSocket, Player>()
@@ -223,7 +257,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
 
   const lobbyPlayers = () => [...players.values()].filter((player) => player.ready && !player.inGame)
 
-  const roomView = (room: Room): RoomView => ({ code: room.code, hostId: room.hostId, phase: room.phase, members: room.members.map(info) })
+  const roomView = (room: Room): RoomView => ({ code: room.code, hostId: room.hostId, phase: room.phase, mode: room.mode, members: room.members.map(info) })
 
   const broadcastRoom = (room: Room) => {
     const view = roomView(room)
@@ -280,13 +314,15 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const startGame = (room: Room) => {
     if (room.phase !== 'countdown') return
     if (room.members.length === 0) return
+    const { countdownMs, limitSeconds } = rules(room.mode)
     room.phase = 'playing'
-    room.startAt = Date.now() + gameCountdownMs
+    room.startAt = Date.now() + countdownMs
     room.lanes.clear()
     room.finished.clear()
     room.entrants.clear()
     room.bikes.clear()
     room.rides.clear()
+    room.laps.clear()
     room.bananas = []
     // 다섯 집 중 가운데부터 채워서 혼자 해도 화면 가운데 집에서 시작한다.
     const order = [2, 1, 3, 0, 4]
@@ -295,6 +331,17 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       room.lanes.set(member.id, lane)
       room.entrants.set(member.id, { ...info(member), lane })
       member.inGame = true
+      if (room.mode === 'kart') {
+        // 카트는 출발선 앞 두 줄로 선다.
+        const spot = gridSpot(lane)
+        member.x = spot.x
+        member.y = 0
+        member.z = spot.z
+        member.h = spot.h
+        member.a = ANIMS.indexOf('kart')
+        room.laps.set(member.id, newTracker(nearestTrack(spot.x, spot.z).index))
+        return
+      }
       const bed = bedSpot(lane)
       member.x = bed.x
       member.y = 0.45 // 침대 높이
@@ -303,19 +350,19 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       member.a = ANIMS.indexOf('sleep')
     })
     const lanes = Object.fromEntries(room.lanes)
-    for (const member of room.members) send(member, { t: 'start', startIn: gameCountdownMs, lanes, map: room.mapId })
+    for (const member of room.members) send(member, { t: 'start', startIn: countdownMs, lanes, map: room.mapId, mode: room.mode })
     sendGameRoster(room)
     broadcastRoom(room)
     lobbyRosterDirty = true
-    room.timers.push(setTimeout(() => endGame(room), gameCountdownMs + limitSeconds * 1000))
+    room.timers.push(setTimeout(() => endGame(room), countdownMs + limitSeconds * 1000))
   }
 
   const beginCountdown = (room: Room) => {
     if (room.phase !== 'waiting') return
     room.phase = 'countdown'
-    // 같은 방에서 연달아 하면 지난 판과 다른 맵이 나온다.
-    room.mapId = randomMapId(room.mapId || undefined)
-    for (const member of room.members) send(member, { t: 'countdown', startIn: lobbyCountdownMs, map: room.mapId })
+    // 같은 방에서 연달아 하면 지난 판과 다른 맵이 나온다. 카트 레이스는 서킷 하나뿐이다.
+    if (room.mode === 'commute') room.mapId = randomMapId(room.mapId || undefined)
+    for (const member of room.members) send(member, { t: 'countdown', startIn: lobbyCountdownMs, map: room.mapId, mode: room.mode })
     broadcastRoom(room)
     room.timers.push(setTimeout(() => startGame(room), lobbyCountdownMs))
   }
@@ -353,7 +400,7 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     if (room.members.length >= MAX_ROOM_PLAYERS) beginCountdown(room)
   }
 
-  const createRoom = (player: Player) => {
+  const createRoom = (player: Player, mode: GameMode = 'commute') => {
     leaveRoom(player)
     const room: Room = {
       code: newCode(),
@@ -369,6 +416,8 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
       bananas: [],
       nextBanana: 1,
       mapId: '',
+      mode,
+      laps: new Map(),
       timers: [],
     }
     rooms.set(room.code, room)
@@ -378,7 +427,16 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
   const acceptMove = (player: Player, x: number, y: number, z: number, h: number, a: number) => {
     const now = Date.now()
     const room = player.room
-    if (player.inGame && room?.phase === 'playing') {
+    if (player.inGame && room?.phase === 'playing' && room.mode === 'kart') {
+      // 출발 신호 전에는 출발선에 서 있어야 한다.
+      if (now < room.startAt || room.finished.has(player.id)) return
+      const dt = Math.min((now - player.lastMoveAt) / 1000, 1)
+      if (Math.hypot(x - player.x, z - player.z) > KART_TOP_SPEED * KART_SPEED_SLACK * dt + PROGRESS_SLACK) return
+      x = Math.min(Math.max(x, -KART_BOUNDS), KART_BOUNDS)
+      z = Math.min(Math.max(z, -KART_BOUNDS), KART_BOUNDS)
+      const tracker = room.laps.get(player.id)
+      if (tracker && advanceTracker(tracker, x, z)) broadcastGame(room, { t: 'lap', id: player.id, lap: tracker.laps })
+    } else if (player.inGame && room?.phase === 'playing') {
       // 출발 전에는 침대에 누워 있어야 한다.
       if (now < room.startAt || room.finished.has(player.id)) return
       const dt = Math.min((now - player.lastMoveAt) / 1000, 1)
@@ -388,7 +446,8 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         (shortcut) => Math.abs(player.z - shortcut.from) < 4 && Math.abs(z - shortcut.to) < 3 && Math.abs(x - shortcutDoorX(shortcut)) < 4,
       )
       if (progress > MAX_SPEED * dt + PROGRESS_SLACK && !viaShortcut) return
-      x = Math.min(Math.max(x, -STREET_HALF_W - 2), STREET_HALF_W + 2)
+      // 집과 앞마당은 도로보다 넓다(양끝 집, 양끝 탈것). 도로 폭으로 자르면 그 자리에서 탈것을 못 탄다.
+      x = Math.min(Math.max(x, -YARD_HALF_W - 2), YARD_HALF_W + 2)
       z = Math.min(Math.max(z, WORLD_MIN_Z), HOUSE_BACK_Z)
     } else {
       x = Math.min(Math.max(x, -LOBBY_HALF), LOBBY_HALF)
@@ -406,15 +465,19 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     const room = player.room
     if (!room || room.phase !== 'playing' || !player.inGame || room.finished.has(player.id)) return
     const ms = Date.now() - room.startAt
+    const { minFinishSeconds, graceMs } = rules(room.mode)
     if (ms < minFinishSeconds * 1000) return
-    if (player.z > FINISH_Z + FINISH_SLACK) return
+    if (room.mode === 'kart') {
+      // 서버가 센 바퀴 수로 확인한다.
+      if ((room.laps.get(player.id)?.laps ?? 0) < KART_LAPS) return
+    } else if (player.z > FINISH_Z + FINISH_SLACK) return
     room.finished.set(player.id, ms)
     const rank = room.finished.size
     for (const member of room.members) if (member.inGame) send(member, { t: 'finished', id: player.id, ms, rank })
     // 1등이 들어오면 남은 사람에게 10초를 준다.
     if (rank === 1 && room.members.some((member) => !room.finished.has(member.id))) {
-      broadcastGame(room, { t: 'closing', endsIn: finishGraceMs })
-      room.timers.push(setTimeout(() => endGame(room), finishGraceMs))
+      broadcastGame(room, { t: 'closing', endsIn: graceMs })
+      room.timers.push(setTimeout(() => endGame(room), graceMs))
     }
     if (room.members.every((member) => room.finished.has(member.id))) endGame(room)
   }
@@ -466,8 +529,9 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
     const rivals = room.members.filter((member) => member.inGame && member !== player && !room.finished.has(member.id))
     if (kind === 'banana') {
       player.lastItemAt = now
-      // 내 바로 뒤(출발 쪽)에 놓는다.
-      room.bananas.push({ id: room.nextBanana++, x: player.x, z: player.z + 1.6, owner: player.id })
+      // 내 바로 뒤에 놓는다. 출근길은 출발 쪽(+z), 카트는 바라보는 방향의 반대쪽이다.
+      const behind = room.mode === 'kart' ? { x: player.x - Math.sin(player.h) * 2.6, z: player.z - Math.cos(player.h) * 2.6 } : { x: player.x, z: player.z + 1.6 }
+      room.bananas.push({ id: room.nextBanana++, ...behind, owner: player.id })
       if (room.bananas.length > 12) room.bananas.shift()
       broadcastGame(room, { t: 'bananas', list: room.bananas })
       return
@@ -613,17 +677,25 @@ export function attachRealtime(server: Server, { path, maxPlayers, isOriginAllow
         return
       case 'quick': {
         if (player.room) return
+        const mode = GAME_MODES.includes(message.mode as GameMode) ? (message.mode as GameMode) : undefined
         const open = [...rooms.values()]
-          .filter((room) => room.phase === 'waiting' && room.members.length < MAX_ROOM_PLAYERS)
+          .filter((room) => room.phase === 'waiting' && room.members.length < MAX_ROOM_PLAYERS && (!mode || room.mode === mode))
           .sort((a, b) => b.members.length - a.members.length)[0]
         if (open) joinRoom(player, open)
-        else createRoom(player)
+        else createRoom(player, mode)
         return
       }
       case 'create':
         if (player.room?.phase === 'playing') return
-        createRoom(player)
+        createRoom(player, GAME_MODES.includes(message.mode as GameMode) ? (message.mode as GameMode) : undefined)
         return
+      case 'mode': {
+        const room = player.room
+        if (!room || room.hostId !== player.id || room.phase !== 'waiting' || !GAME_MODES.includes(message.mode as GameMode)) return
+        room.mode = message.mode as GameMode
+        broadcastRoom(room)
+        return
+      }
       case 'join': {
         const code = cleanText(message.code, ROOM_CODE_LENGTH).toUpperCase()
         const room = rooms.get(code)

@@ -28,7 +28,7 @@ function frequency(note: number) {
   return 440 * 2 ** ((note - 69) / 12)
 }
 
-export type EffectName = 'wake' | 'hit' | 'stumble' | 'whistle' | 'splash' | 'jump' | 'arrive' | 'late' | 'tick' | 'go' | 'pop' | 'ultimate' | 'boom' | 'smack'
+export type EffectName = 'wake' | 'hit' | 'stumble' | 'whistle' | 'splash' | 'jump' | 'arrive' | 'late' | 'tick' | 'go' | 'pop' | 'ultimate' | 'boom' | 'smack' | 'turbo'
 
 /**
  * 음원 파일 없이 브라우저에서 바로 만드는 알람과 효과음. 소리는 사용자가 누른 뒤에만 시작할 수 있다.
@@ -172,6 +172,11 @@ export function createAudio() {
           tone('square', 900, now, 0.05, 0.2, 120)
           tone('sawtooth', 160, now, 0.18, 0.22, 45)
           tone('triangle', 2400, now, 0.03, 0.08, 600)
+          break
+        case 'turbo':
+          // 카트 터보: 붕 하고 치고 나간다.
+          tone('sawtooth', 180, now, 0.35, 0.14, 900)
+          tone('square', 90, now, 0.3, 0.08, 260)
           break
         case 'boom':
           tone('sawtooth', 120, now, 0.6, 0.22, 35)

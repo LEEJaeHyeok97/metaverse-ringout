@@ -7,17 +7,22 @@ export const MAX_CHAT_LENGTH = 40
 
 /** 캐릭터 동작. 다른 화면에서 같은 자세로 그리기 위해 함께 보낸다. */
 // 번호로 주고받으므로 새 동작은 끝에만 붙인다.
-export const ANIMS = ['idle', 'walk', 'jump', 'sleep', 'down', 'cheer', 'stumble', 'ride', 'punch', 'trapped', 'ufo', 'kick', 'scooter', 'car', 'sports', 'truck', 'slide'] as const
+export const ANIMS = ['idle', 'walk', 'jump', 'sleep', 'down', 'cheer', 'stumble', 'ride', 'punch', 'trapped', 'ufo', 'kick', 'scooter', 'car', 'sports', 'truck', 'slide', 'kart', 'drift'] as const
 export type Anim = (typeof ANIMS)[number]
 
 export type PlayerInfo = { id: number; nickname: string; color: string }
 
 export type RoomPhase = 'waiting' | 'countdown' | 'playing'
 
+/** 방에서 할 게임. commute는 출근 레이스, kart는 카트 레이스 */
+export type GameMode = 'commute' | 'kart'
+export const GAME_MODES: readonly GameMode[] = ['commute', 'kart']
+
 export type RoomView = {
   code: string
   hostId: number
   phase: RoomPhase
+  mode: GameMode
   members: PlayerInfo[]
 }
 
@@ -37,8 +42,11 @@ export type ClientMessage =
   | { t: 'hello'; nickname: string; color: string }
   | { t: 'move'; x: number; y: number; z: number; h: number; a: number }
   | { t: 'chat'; text: string }
-  | { t: 'quick' }
-  | { t: 'create' }
+  /** mode를 주면 그 게임을 하는 방에 들어가거나 새로 만든다. */
+  | { t: 'quick'; mode?: GameMode }
+  | { t: 'create'; mode?: GameMode }
+  /** 방장이 대기실에서 게임을 바꾼다. */
+  | { t: 'mode'; mode: GameMode }
   | { t: 'join'; code: string }
   | { t: 'leave' }
   | { t: 'start' }
@@ -63,8 +71,10 @@ export type ServerMessage =
   | { t: 'snap'; p: SnapshotEntry[] }
   | { t: 'room'; room: RoomView | null }
   /** map: 이번 판에 달릴 맵 id (course.ts의 MAPS) */
-  | { t: 'countdown'; startIn: number; map: string }
-  | { t: 'start'; startIn: number; lanes: Record<number, number>; map: string }
+  | { t: 'countdown'; startIn: number; map: string; mode: GameMode }
+  | { t: 'start'; startIn: number; lanes: Record<number, number>; map: string; mode: GameMode }
+  /** 카트 레이스에서 누군가 출발선을 넘었다. lap은 지금까지 넘은 수(다 돈 바퀴) */
+  | { t: 'lap'; id: number; lap: number }
   | { t: 'finished'; id: number; ms: number; rank: number }
   /** 1등이 도착했다. endsIn 뒤에 게임이 끝난다. */
   | { t: 'closing'; endsIn: number }
